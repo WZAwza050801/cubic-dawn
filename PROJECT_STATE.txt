@@ -1,6 +1,6 @@
 Project: Cubic Dawn / 方块黎明
 Phase: P0 edit test, M00-M06 done
-Current objective: fixed simulation step (M07)
+Current objective: M07 fixed movement step done; persistent delayed tasks next
 Primary language: Java 21 (Eclipse Temurin 21.0.7)
 Build system: Gradle Wrapper 8.14.3
 Graphics: LWJGL 3.4.3, OpenGL 3.3

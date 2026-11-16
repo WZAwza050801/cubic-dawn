@@ -6,6 +6,7 @@ import dev.cubicdawn.world.ButtonEdge;
 import dev.cubicdawn.world.CellView;
 import dev.cubicdawn.world.EditHotbar;
 import dev.cubicdawn.world.EditReceipt;
+import dev.cubicdawn.world.FixedStep;
 import dev.cubicdawn.world.PlayerBody;
 import dev.cubicdawn.world.PlayerMotion;
 import dev.cubicdawn.world.PlayerState;
@@ -41,7 +42,6 @@ public final class Main {
     private static final float FAR_PLANE = 100f;
     private static final float MOUSE_SENSITIVITY = 0.002f;
     private static final float MAX_PITCH = (float) Math.toRadians(89.0);
-    private static final float MAX_FRAME_SECONDS = 0.05f;
     private static final float REACH = 5f;
     private static final int VERTEX_COUNT = 36;
     private static final int FLOATS_PER_VERTEX = 6;
@@ -121,6 +121,7 @@ public final class Main {
     private BlockWorld blocks;
     private final ButtonEdge leftEdge = new ButtonEdge();
     private final ButtonEdge rightEdge = new ButtonEdge();
+    private final FixedStep simulation = new FixedStep();
     private final ButtonEdge jumpEdge = new ButtonEdge();
     private final ButtonEdge pauseEdge = new ButtonEdge();
     private final ButtonEdge quitEdge = new ButtonEdge();
@@ -295,14 +296,8 @@ public final class Main {
             glfwPollEvents();
             handleModeKeys();
             double now = glfwGetTime();
-            float frameSeconds = (float) (now - lastFrameTime);
+            double frameSeconds = now - lastFrameTime;
             lastFrameTime = now;
-            if (frameSeconds > MAX_FRAME_SECONDS) {
-                frameSeconds = MAX_FRAME_SECONDS;
-            }
-            if (frameSeconds < 0f) {
-                frameSeconds = 0f;
-            }
             if (playing()) {
                 updateLook();
                 updateMove(frameSeconds);
@@ -397,6 +392,8 @@ public final class Main {
     }
 
     private void disarmPlayButtons() {
+        simulation.reset();
+        lastFrameTime = glfwGetTime();
         leftEdge.disarm();
         rightEdge.disarm();
         jumpEdge.disarm();
@@ -434,7 +431,7 @@ public final class Main {
         }
     }
 
-    private void updateMove(float frameSeconds) {
+    private void updateMove(double frameSeconds) {
         float[] forward = horizontalForward(yaw);
         float[] right = horizontalRight(yaw);
         float wishX = 0f;
@@ -457,7 +454,10 @@ public final class Main {
         }
         PlayerMotion.Pose pose = new PlayerMotion.Pose(eyeX, eyeY, eyeZ, velocityY);
         boolean jump = jumpEdge.poll(key(GLFW_KEY_SPACE));
-        PlayerMotion.step(pose, frameSeconds, wishX, wishZ, jump, blocks::isSolidAt);
+        final float inputX = wishX;
+        final float inputZ = wishZ;
+        simulation.advance(frameSeconds, true, jump, (seconds, jumpPressed) ->
+                PlayerMotion.step(pose, seconds, inputX, inputZ, jumpPressed, blocks::isSolidAt));
         eyeX = pose.x;
         eyeY = pose.y;
         eyeZ = pose.z;

@@ -8,6 +8,7 @@ import dev.cubicdawn.world.CellKind;
 import dev.cubicdawn.world.CellView;
 import dev.cubicdawn.world.EditHotbar;
 import dev.cubicdawn.world.EditReceipt;
+import dev.cubicdawn.world.FixedStep;
 import dev.cubicdawn.world.PlayerBody;
 import dev.cubicdawn.world.PlayerMotion;
 import dev.cubicdawn.world.PlayerState;
@@ -33,11 +34,61 @@ public final class VerifyMath {
         verify.edits();
         verify.movement();
         verify.input();
+        verify.timing();
         verify.saves();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
         System.out.println("ALL PASS " + "coordinates rays edits movement input saves");
+    }
+
+    private void timing() {
+        PlayerMotion.Pose reference = timedMovement(30);
+        boolean same = true;
+        for (int fps : new int[] {60, 120, 144}) {
+            PlayerMotion.Pose other = timedMovement(fps);
+            same &= reference.x == other.x && reference.y == other.y
+                    && reference.z == other.z && reference.velocityY == other.velocityY;
+        }
+        check("TIME01", same, "fixed input diverged at different render rates");
+        FixedStep clock = new FixedStep();
+        int[] ticks = {0};
+        int[] jumps = {0};
+        FixedStep.Tick action = (seconds, jump) -> { ticks[0]++; if (jump) jumps[0]++; };
+        clock.advance(FixedStep.SECONDS / 2, true, true, action);
+        clock.advance(3600, false, false, action);
+        clock.advance(FixedStep.SECONDS / 2, true, false, action);
+        check("TIME02", ticks[0] == 0 && jumps[0] == 0, "pause retained time or jump");
+        clock.advance(FixedStep.SECONDS / 2, true, false, action);
+        int caughtUp = clock.advance(3600, true, false, action);
+        int debt = clock.advance(0, true, false, action);
+        check("TIME03", ticks[0] == 4 && caughtUp == 3 && debt == 0,
+                "long suspension created simulation debt");
+        clock.reset();
+        ticks[0] = 0;
+        clock.advance(FixedStep.SECONDS / 4, true, true, action);
+        clock.advance(FixedStep.SECONDS / 4, true, false, action);
+        clock.advance(FixedStep.SECONDS / 2, true, false, action);
+        clock.advance(FixedStep.SECONDS * 3, true, false, action);
+        check("TIME_JUMP", ticks[0] == 4 && jumps[0] == 1, "jump lost or repeated across ticks");
+        clock.reset();
+        ticks[0] = 0;
+        clock.advance(Double.NaN, true, false, action);
+        clock.advance(Double.POSITIVE_INFINITY, true, false, action);
+        clock.advance(-1, true, false, action);
+        clock.advance(FixedStep.SECONDS, true, false, action);
+        check("TIME_INVALID", ticks[0] == 1, "invalid clock sample poisoned accumulator");
+    }
+
+    private PlayerMotion.Pose timedMovement(int fps) {
+        FixedStep clock = new FixedStep();
+        PlayerMotion.Pose pose = new PlayerMotion.Pose(0, 2, 0, 0);
+        PlayerBody.SolidAt floor = (x, y, z) -> y <= 0;
+        for (int frame = 0; frame < fps * 2; frame++) {
+            clock.advance(1.0 / fps, true, frame == 0, (seconds, jump) ->
+                    PlayerMotion.step(pose, seconds, 1, -1, jump, floor));
+        }
+        return pose;
     }
 
     private void coordinates() {
