@@ -1,0 +1,57 @@
+plugins {
+    id 'application'
+}
+
+group = 'dev.cubicdawn'
+version = '0.0.1-SNAPSHOT'
+
+repositories {
+    mavenCentral {
+        // Gradle Module Metadata 不包含 LWJGL 的 classifier 原生库，必须改走 POM。
+        metadataSources {
+            mavenPom()
+            ignoreGradleMetadataRedirection()
+        }
+    }
+}
+
+def lwjglVersion = '3.4.3'
+def lwjglNatives = 'natives-windows'
+
+dependencies {
+    implementation platform("org.lwjgl:lwjgl-bom:${lwjglVersion}")
+
+    implementation 'org.lwjgl:lwjgl'
+    implementation 'org.lwjgl:lwjgl-glfw'
+    implementation 'org.lwjgl:lwjgl-opengl'
+
+    runtimeOnly "org.lwjgl:lwjgl::${lwjglNatives}"
+    runtimeOnly "org.lwjgl:lwjgl-glfw::${lwjglNatives}"
+    runtimeOnly "org.lwjgl:lwjgl-opengl::${lwjglNatives}"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+application {
+    mainClass = 'dev.cubicdawn.Main'
+}
+
+tasks.register('verifyMath', JavaExec) {
+    group = 'verification'
+    description = 'Headless checks for coordinates, rays, edits, movement, and saves.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.cubicdawn.VerifyMath'
+}
+
+tasks.withType(JavaExec).configureEach {
+    if (name == 'run' && project.hasProperty('worldFile')) {
+        systemProperty 'cubicdawn.world', project.property('worldFile').toString()
+    }
+    if (name == 'run' && project.hasProperty('frames')) {
+        systemProperty 'cubicdawn.frames', project.property('frames').toString()
+    }
+}
