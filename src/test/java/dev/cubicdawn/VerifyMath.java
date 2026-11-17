@@ -41,6 +41,7 @@ public final class VerifyMath {
         verify.saves();
         verify.fallingSand();
         verify.inventory();
+        verify.trees();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
@@ -785,6 +786,31 @@ public final class VerifyMath {
         boolean built = PlayerActions.placeBlock(world, emptyBag, 0, 300, 1, 1, 0, 0, null).accepted();
         check("INV_LOOP", made && built && emptyBag.count(BlockIds.STONE_BRICKS) == 3
                 && world.getId(1, 1, 0) == BlockIds.STONE_BRICKS, "collect craft build loop");
+    }
+
+    private void trees() {
+        BlockWorld first = BlockWorld.generateForestIsland();
+        BlockWorld second = BlockWorld.generateForestIsland();
+        check("TREE_SEED", first.sameSolids(second) && first.countSolid() == 1764 + 42
+                && first.getId(-5, BlockWorld.surface(-5, -4) + 1, -4) == BlockIds.LOG, "tree generation");
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.DIRT, 0, null);
+        world.placeBlock(2, 1, 3, 0, BlockIds.STONE, 0, null);
+        int before = world.mutations();
+        check("TREE_BUILDING", !world.plantTree(3, 0, 1, 0, null).accepted()
+                && world.mutations() == before && world.getId(1, 3, 0) == BlockIds.STONE, "overwrote building");
+        world.breakBlock(4, 1, 3, 0, world.query(1, 3, 0).revision());
+        before = world.mutations();
+        check("TREE_BODY", !world.plantTree(5, 0, 1, 0, (x,y,z) -> y == 4).accepted()
+                && before == world.mutations(), "buried player");
+        world.setSimulationLoaded(1, 3, 0, false);
+        check("TREE_UNLOADED", !world.plantTree(6, 0, 1, 0, null).accepted(), "unloaded footprint");
+        world.setSimulationLoaded(1, 3, 0, true);
+        check("TREE_PLANT", world.plantTree(7, 0, 1, 0, null).accepted() && world.countSolid() == 22
+                && !world.plantTree(7, 0, 1, 0, null).accepted(), "tree or duplicate");
+        BlockWorld edge = BlockWorld.empty();
+        edge.placeBlock(1, 16, 0, 0, BlockIds.DIRT, 0, null);
+        check("TREE_BOUNDARY", !edge.plantTree(2, 16, 1, 0, null).accepted() && edge.countSolid() == 1, "boundary overwrite");
     }
 
     private void check(String id, boolean passed, String detail) {
