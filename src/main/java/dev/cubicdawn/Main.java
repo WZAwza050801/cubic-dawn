@@ -863,7 +863,7 @@ public final class Main {
                 drawText(names[i],left+400+i*100,top-70,1,WHITE);
                 drawStorageSlot(box.slot(i),left+400+i*100,top-132,50,false);
             }
-            drawText("COOK "+box.progress()+"/120   BURN "+box.burn(),left+400,top-160,1,WHITE);
+            drawText(String.format(java.util.Locale.ROOT,"COOK %.1f/2.0S  FUEL %.1fS",box.progress()/60f,box.burn()/60f),left+400,top-160,1,WHITE);
             drawQuad(left+400,top-180,250,8,PAUSE_COLOR);
             drawQuad(left+400,top-180,250*box.progress()/120,8,SELECT_COLOR);
             drawText("T: INPUT ONE   B: FUEL ONE   G: TAKE OUTPUT",left+20,top-240,1,WHITE);
