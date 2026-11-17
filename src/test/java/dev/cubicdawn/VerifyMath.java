@@ -5,6 +5,7 @@ import dev.cubicdawn.world.BlockIds;
 import dev.cubicdawn.world.BlockTicks;
 import dev.cubicdawn.world.Inventory;
 import dev.cubicdawn.world.ItemIds;
+import dev.cubicdawn.world.MiningProgress;
 import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.BlockWorld;
 import dev.cubicdawn.world.ButtonEdge;
@@ -44,6 +45,7 @@ public final class VerifyMath {
         verify.inventory();
         verify.trees();
         verify.woodCrafting();
+        verify.mining();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
@@ -852,6 +854,48 @@ public final class VerifyMath {
         seeds.add(ItemIds.SAPLING, 1);
         check("SAPLING_FAIL", !PlayerActions.placeBlock(world, seeds, 0, 4, 8, 1, 0, 0, null).accepted()
                 && seeds.count(ItemIds.SAPLING) == 1, "failed planting consumed seed");
+    }
+
+    private void mining() {
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.STONE, 0, null);
+        VoxelRay.Hit hit = VoxelRay.castFromEngineEye(0, 0, 2, 0, 0, -1, 5, world);
+        MiningProgress progress = new MiningProgress();
+        int ticks = 0;
+        while (!progress.advance(1f/60, true, hit, 0, 0) && ticks < 200) ticks++;
+        check("MINE_HAND", ticks + 1 == 108, "hand ticks=" + (ticks + 1));
+        ticks = 0;
+        while (!progress.advance(1f/60, true, hit, 0, ItemIds.WOOD_PICKAXE) && ticks < 200) ticks++;
+        check("MINE_PICKAXE", ticks + 1 == 36, "tool ticks=" + (ticks + 1));
+        progress.advance(.3f, true, hit, 0, 0);
+        progress.advance(.1f, false, hit, 0, 0);
+        check("MINE_RELEASE", progress.fraction() == 0, "release kept progress");
+        progress.advance(.3f, true, hit, 0, 0);
+        progress.advance(.1f, true, hit, 1, 0);
+        check("MINE_SLOT", progress.fraction() < .06f, "slot change kept progress");
+        progress.advance(.3f, true, hit, 1, 0);
+        world.breakBlock(2, 0, 0, 0, world.query(0, 0, 0).revision());
+        world.placeBlock(3, 0, 0, 0, BlockIds.STONE, world.query(0, 0, 0).revision(), null);
+        var changed = VoxelRay.castFromEngineEye(0, 0, 2, 0, 0, -1, 5, world);
+        progress.advance(.1f, true, changed, 1, 0);
+        check("MINE_REVISION", progress.fraction() < .06f, "replacement inherited progress");
+        progress.reset();
+        check("MINE_PAUSE", progress.fraction() == 0, "pause reset");
+        check("MINE_MATCHED_TOOL", MiningProgress.secondsFor(BlockIds.LOG, ItemIds.WOOD_AXE) == .3f
+                && MiningProgress.secondsFor(BlockIds.LOG, ItemIds.WOOD_PICKAXE) == .9f
+                && MiningProgress.secondsFor(BlockIds.DIRT, ItemIds.WOOD_SHOVEL) == .15f,
+                "tool material matching");
+        int completed = -1;
+        boolean same = true;
+        for (int fps : new int[] {30, 60, 120, 144}) {
+            FixedStep clock = new FixedStep(); MiningProgress mine = new MiningProgress();
+            int[] successes = {0};
+            for (int frame = 0; frame < fps * 3; frame++) clock.advance(1.0/fps, true, false,
+                    (seconds,jump) -> { if (mine.advance(seconds,true,changed,0,ItemIds.WOOD_PICKAXE)) successes[0]++; });
+            if (completed < 0) completed = successes[0];
+            same &= successes[0] == completed;
+        }
+        check("MINE_FRAMERATES", same && completed == 5, "rate changed mining completions");
     }
 
     private void check(String id, boolean passed, String detail) {
