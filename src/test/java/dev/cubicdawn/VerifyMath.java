@@ -3,6 +3,8 @@ package dev.cubicdawn;
 import dev.cubicdawn.world.Aabb;
 import dev.cubicdawn.world.BlockIds;
 import dev.cubicdawn.world.BlockTicks;
+import dev.cubicdawn.world.Inventory;
+import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.BlockWorld;
 import dev.cubicdawn.world.ButtonEdge;
 import dev.cubicdawn.world.CellKind;
@@ -38,10 +40,11 @@ public final class VerifyMath {
         verify.timing();
         verify.saves();
         verify.fallingSand();
+        verify.inventory();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
-        System.out.println("ALL PASS " + "coordinates rays edits movement input saves scheduled-blocks");
+        System.out.println("ALL PASS " + "coordinates rays edits movement input saves scheduled-blocks inventory crafting");
     }
 
     private void timing() {
@@ -477,7 +480,7 @@ public final class VerifyMath {
         Path file = directory.resolve("world.txt");
         BlockWorld world = BlockWorld.generateIsland();
         PlayerState player = new PlayerState(2f, 3.5f, 4f, 0.25f, -0.5f, 3);
-        SnapshotIO.save(file, world, player);
+        SnapshotIO.save(file, world, player, Inventory.starter());
         SnapshotIO.Snapshot loaded = SnapshotIO.load(file);
         BlockWorld restored = BlockWorld.empty();
         restored.applySnapshot(loaded);
@@ -488,13 +491,13 @@ public final class VerifyMath {
                 && loaded.player().yaw() == player.yaw()
                 && loaded.player().pitch() == player.pitch()
                 && loaded.player().slot() == 3;
-        check("SAVE01", restored.sameSolids(world) && loaded.version() == 5, "reload");
+        check("SAVE01", restored.sameSolids(world) && loaded.version() == 6, "reload");
         check("SAVE02", playerOk, "player");
 
         BlockWorld edited = BlockWorld.empty();
         edited.placeBlock(80L, 0, 0, 0, BlockIds.STONE, 0, (x, y, z) -> false);
         long revision = edited.revision();
-        String earlier = SnapshotIO.encode(edited, player, revision);
+        String earlier = SnapshotIO.encode(edited, player, revision, Inventory.starter());
         edited.placeBlock(81L, 1, 0, 0, BlockIds.DIRT, 0, (x, y, z) -> false);
         Path partial = directory.resolve("partial.txt");
         SnapshotIO.atomicWrite(partial, earlier.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -509,8 +512,8 @@ public final class VerifyMath {
         check("SAVE06", edited.dirty() && keptDirtOut && edited.getId(1, 0, 0) == BlockIds.DIRT, "dirty=" + edited.dirty());
 
         Path guarded = directory.resolve("guarded.txt");
-        SnapshotIO.save(guarded, world, player);
-        SnapshotIO.save(guarded, world, player);
+        SnapshotIO.save(guarded, world, player, Inventory.starter());
+        SnapshotIO.save(guarded, world, player, Inventory.starter());
         byte[] backup = Files.readAllBytes(SnapshotIO.backupPath(guarded));
         String broken = Files.readString(guarded).replace("seed " + BlockWorld.SEED, "seed 0");
         Files.writeString(guarded, broken);
@@ -542,12 +545,12 @@ public final class VerifyMath {
                         && migrated.getId(0, 0, 0) == 42
                         && old.unknownIds().contains(42),
                 "unknown=" + old.unknownIds());
-        SnapshotIO.save(legacy, migrated, player);
+        SnapshotIO.save(legacy, migrated, player, Inventory.starter());
         SnapshotIO.Snapshot again = SnapshotIO.load(legacy);
         BlockWorld second = BlockWorld.empty();
         second.applySnapshot(again);
         check("SAVE08",
-                again.version() == 5
+                again.version() == 6
                         && second.getId(0, 0, 0) == 42
                         && second.getId(1, 2, 3) == BlockIds.STONE,
                 "version=" + again.version());
@@ -559,7 +562,7 @@ public final class VerifyMath {
         world.placeBlock(2, 0, 3, 0, BlockIds.SAND, 0, null);
         for (int i = 0; i < 3; i++) world.tick(null);
         Path file = Files.createTempDirectory("cubic-dawn-ticks").resolve("world.txt");
-        SnapshotIO.save(file, world, null);
+        SnapshotIO.save(file, world, null, Inventory.starter());
         BlockWorld restored = BlockWorld.empty();
         restored.applySnapshot(SnapshotIO.load(file));
         check("TASK_SAVE", restored.blockTicks().tick() == 3
@@ -643,7 +646,7 @@ public final class VerifyMath {
             for (int frame = 0; frame < fps; frame++) {
                 clock.advance(1.0 / fps, true, false, (seconds, jump) -> falling.tick(null));
             }
-            String state = SnapshotIO.encode(falling, null, falling.revision());
+            String state = SnapshotIO.encode(falling, null, falling.revision(), Inventory.starter());
             if (reference == null) reference = state;
             sameRates &= reference.equals(state);
             long beforePause = falling.blockTicks().tick();
@@ -672,6 +675,116 @@ public final class VerifyMath {
         int newline = canonical.indexOf('\n');
         return canonical.substring(0, newline + 1) + "checksum sha256 "
                 + java.util.HexFormat.of().formatHex(digest) + "\n" + canonical.substring(newline + 1);
+    }
+
+    private void inventory() throws Exception {
+        Inventory bag = new Inventory();
+        bag.add(BlockIds.STONE, 70);
+        check("INV_STACK", bag.slot(0).count() == 64 && bag.slot(1).count() == 6, "stack split");
+        bag.remove(0, 1);
+        bag.add(BlockIds.STONE, 1);
+        check("INV_MERGE", bag.slot(0).count() == 64 && bag.count(BlockIds.STONE) == 70, "merge order");
+        var saved = bag.snapshot();
+        bag.swap(0, 26);
+        check("INV_SWAP", bag.slot(26).count() == 64 && saved.get(0).count() == 64
+                && saved.get(26).count() == 0, "swap or snapshot alias");
+        Inventory full = new Inventory();
+        full.add(BlockIds.DIRT, Inventory.SLOTS * Inventory.STACK_LIMIT);
+        var before = full.snapshot();
+        check("INV_FULL", !full.add(BlockIds.STONE, 1) && before.equals(full.snapshot()), "overflow lost items");
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.STONE, 0, null);
+        long revision = world.revision();
+        var refused = PlayerActions.breakBlock(world, full, 2, 0, 0, 0, world.query(0, 0, 0).revision());
+        check("INV_FULL_MINE", !refused.accepted() && world.revision() == revision
+                && world.getId(0, 0, 0) == BlockIds.STONE && before.equals(full.snapshot()), "full mining deleted block");
+        Inventory collected = new Inventory();
+        int cellRevision = world.query(0, 0, 0).revision();
+        var mined = PlayerActions.breakBlock(world, collected, 3, 0, 0, 0, cellRevision);
+        var duplicate = PlayerActions.breakBlock(world, collected, 3, 0, 0, 0, cellRevision);
+        check("INV_MINE", mined.accepted() && !duplicate.accepted() && collected.count(BlockIds.STONE) == 1
+                && world.getId(0, 0, 0) == BlockIds.AIR, "mining duplicated items");
+        var rejectedPlace = PlayerActions.placeBlock(world, collected, 0, 4, 0, 0, 0,
+                world.query(0, 0, 0).revision(), (x, y, z) -> true);
+        check("INV_PLACE_REJECT", !rejectedPlace.accepted() && collected.count(BlockIds.STONE) == 1,
+                "failed placement consumed item");
+        var placed = PlayerActions.placeBlock(world, collected, 0, 5, 0, 0, 0,
+                world.query(0, 0, 0).revision(), null);
+        var empty = PlayerActions.placeBlock(world, collected, 0, 6, 1, 0, 0, 0, null);
+        check("INV_PLACE", placed.accepted() && !empty.accepted() && collected.count(BlockIds.STONE) == 0
+                && world.getId(1, 0, 0) == BlockIds.AIR, "placement not finite");
+        Inventory crafting = new Inventory();
+        crafting.add(BlockIds.SAND, 4);
+        check("CRAFT_SANDSTONE", crafting.craft(Inventory.Recipe.SANDSTONE)
+                && crafting.count(BlockIds.SAND) == 0 && crafting.count(BlockIds.SANDSTONE) == 1, "recipe");
+        crafting.add(BlockIds.STONE, 4);
+        check("CRAFT_BRICKS", crafting.craft(Inventory.Recipe.STONE_BRICKS)
+                && crafting.count(BlockIds.STONE) == 0 && crafting.count(BlockIds.STONE_BRICKS) == 4, "recipe");
+        var noIngredients = crafting.snapshot();
+        check("CRAFT_MISSING", !crafting.craft(Inventory.Recipe.SANDSTONE)
+                && noIngredients.equals(crafting.snapshot()), "failed crafting changed items");
+        Inventory packed = new Inventory();
+        packed.add(BlockIds.SAND, 64);
+        packed.add(BlockIds.DIRT, 26 * 64);
+        var packedBefore = packed.snapshot();
+        check("CRAFT_FULL", !packed.craft(Inventory.Recipe.SANDSTONE)
+                && packedBefore.equals(packed.snapshot()), "craft without output space consumed ingredients");
+        // Consuming the entire input stack frees the output slot even in a full inventory.
+        packed.remove(0, 60);
+        check("CRAFT_FREED_SLOT", packed.craft(Inventory.Recipe.SANDSTONE)
+                && packed.count(BlockIds.SANDSTONE) == 1, "did not reuse freed slot");
+        Inventory split = new Inventory();
+        split.add(BlockIds.STONE, 66);
+        split.remove(0, 62);
+        check("CRAFT_SPLIT_INPUT", split.craft(Inventory.Recipe.STONE_BRICKS)
+                && split.count(BlockIds.STONE) == 0 && split.count(BlockIds.STONE_BRICKS) == 4, "split ingredients");
+        crafting.swap(1, 26);
+        crafting.add(42, 2);
+        Path file = Files.createTempDirectory("cubic-dawn-inventory").resolve("world.txt");
+        SnapshotIO.save(file, world, null, crafting);
+        var snapshot = SnapshotIO.load(file);
+        Inventory recovered = Inventory.restore(snapshot.inventory());
+        check("INV_SAVE", snapshot.version() == 6 && recovered.snapshot().equals(crafting.snapshot())
+                && recovered.count(42) == 2, "inventory reload or unknown id lost");
+        Inventory exhausted = new Inventory();
+        SnapshotIO.save(file, world, null, exhausted);
+        check("INV_EMPTY_SAVE", Inventory.restore(SnapshotIO.load(file).inventory()).count(BlockIds.SAND) == 0,
+                "empty bag refilled from starter kit");
+        String v5 = checkedSave("cubic-dawn-blocks 5\ntick 12\nfall 18 0 1 0\n0 1 0 8\n");
+        var legacy = SnapshotIO.parse(v5);
+        check("INV_MIGRATION", Inventory.restore(legacy.inventory()).count(BlockIds.SAND) == 16
+                && legacy.simulationTick() == 12 && legacy.tasks().size() == 1, "v5 upgrade");
+        String canonical = "cubic-dawn-blocks 6\ntick 0\n";
+        for (int slot = 0; slot < Inventory.SLOTS; slot++) canonical += "item " + slot + " 0 0\n";
+        boolean invalidRejected = true;
+        for (String invalid : new String[] {
+                canonical.replace("item 0 0 0\n", ""), canonical + "item 0 1 1\n",
+                canonical.replace("item 0 0 0", "item 0 3 65"),
+                canonical.replace("item 0 0 0", "item 0 0 1"),
+                canonical.replace("item 0 0 0", "item 27 0 0"),
+                canonical.replace("item 0 0 0", "item 0 -1 1")}) {
+            try { SnapshotIO.parse(checkedSave(invalid)); invalidRejected = false; }
+            catch (IllegalArgumentException | IllegalStateException expected) { }
+        }
+        check("INV_INVALID", invalidRejected, "invalid inventory accepted");
+        String tampered = Files.readString(file).replace("item 0 0 0", "item 0 3 64");
+        boolean checksum = false;
+        try { SnapshotIO.parse(tampered); }
+        catch (IllegalStateException expected) { checksum = expected.getMessage().contains("checksum"); }
+        check("INV_CHECKSUM", checksum, "inventory not covered by checksum");
+        Files.delete(file);
+        var backup = SnapshotIO.load(file);
+        check("INV_BACKUP", backup.restoredFromBackup()
+                && backup.inventory().equals(crafting.snapshot()), "backup lost inventory");
+        Inventory emptyBag = new Inventory();
+        for (int x = 1; x <= 4; x++) {
+            world.placeBlock(100 + x, x, 0, 0, BlockIds.STONE, 0, null);
+            PlayerActions.breakBlock(world, emptyBag, 200 + x, x, 0, 0, world.query(x, 0, 0).revision());
+        }
+        boolean made = emptyBag.craft(Inventory.Recipe.STONE_BRICKS);
+        boolean built = PlayerActions.placeBlock(world, emptyBag, 0, 300, 1, 1, 0, 0, null).accepted();
+        check("INV_LOOP", made && built && emptyBag.count(BlockIds.STONE_BRICKS) == 3
+                && world.getId(1, 1, 0) == BlockIds.STONE_BRICKS, "collect craft build loop");
     }
 
     private void check(String id, boolean passed, String detail) {

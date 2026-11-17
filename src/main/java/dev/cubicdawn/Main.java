@@ -7,6 +7,8 @@ import dev.cubicdawn.world.CellView;
 import dev.cubicdawn.world.EditHotbar;
 import dev.cubicdawn.world.EditReceipt;
 import dev.cubicdawn.world.FixedStep;
+import dev.cubicdawn.world.Inventory;
+import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.PlayerBody;
 import dev.cubicdawn.world.PlayerMotion;
 import dev.cubicdawn.world.PlayerState;
@@ -113,6 +115,16 @@ public final class Main {
     private boolean cursorReady;
     private boolean focused = true;
     private boolean paused;
+    private boolean inventoryOpen;
+    private int inventorySelection;
+    private Inventory inventory = Inventory.starter();
+    private String notice = "E: INVENTORY AND CRAFTING";
+    private final ButtonEdge inventoryEdge = new ButtonEdge();
+    private final ButtonEdge inventoryClick = new ButtonEdge();
+    private final ButtonEdge sandstoneEdge = new ButtonEdge();
+    private final ButtonEdge bricksEdge = new ButtonEdge();
+    private final ButtonEdge[] slotEdges = new ButtonEdge[9];
+    { for (int i = 0; i < slotEdges.length; i++) slotEdges[i] = new ButtonEdge(); }
     private boolean saveAllowed;
     private int selectedSlot;
     private int scrollPending;
@@ -160,6 +172,7 @@ public final class Main {
         if (window == NULL) {
             throw new IllegalStateException("Window creation failed.");
         }
+        glfwSetWindowSizeLimits(window, 600, 420, GLFW_DONT_CARE, GLFW_DONT_CARE);
         glfwMakeContextCurrent(window);
         glfwSwapInterval(1);
         glfwShowWindow(window);
@@ -177,6 +190,7 @@ public final class Main {
         });
         focusCallback = GLFWWindowFocusCallback.create((handle, focusedNow) -> {
             focused = focusedNow;
+            disarmInventoryButtons();
             cursorReady = false;
             disarmPlayButtons();
             updateCursorMode();
@@ -189,9 +203,9 @@ public final class Main {
         System.out.println("Java: " + System.getProperty("java.version"));
         System.out.println("LWJGL: " + Version.getVersion());
         System.out.println("OpenGL: " + GL11.glGetString(GL11.GL_VERSION));
-        System.out.println("Edit test: left break, right place, 1-9 or wheel selects, Esc pauses, Q quits while paused, F5 saves.");
+        System.out.println("Left collect, right place, 1-9 or wheel selects, E inventory, Esc pauses, Q quits while paused, F5 saves.");
         System.out.println("Slot 8: sand falls one cell every 6 simulation ticks; project sandbox rule.");
-        System.out.println("Java Edition mechanics version: not set. This bar does not spend items.");
+        System.out.println("Java Edition mechanics version: not set. Finite starter materials and project crafting rules.");
 
         float[] cube = cubeVertices();
         if (cube.length != VERTEX_COUNT * FLOATS_PER_VERTEX) {
@@ -210,7 +224,7 @@ public final class Main {
         blocks = BlockWorld.generateIsland();
         blocks.checkGeneratedIsland();
         BlockWorld roundTrip = BlockWorld.empty();
-        roundTrip.applySnapshot(SnapshotIO.parse(SnapshotIO.encode(blocks, null, blocks.revision())));
+        roundTrip.applySnapshot(SnapshotIO.parse(SnapshotIO.encode(blocks, null, blocks.revision(), inventory)));
         if (!roundTrip.sameSolids(blocks)) {
             throw new IllegalStateException("Saving and loading did not restore the generated blocks.");
         }
@@ -247,7 +261,7 @@ public final class Main {
         System.out.println("Jump speed: " + PlayerBody.JUMP_SPEED);
         System.out.println("Reach: " + REACH);
         System.out.println("Solid blocks: " + blocks.countSolid());
-        System.out.println("Hotbar: " + blockName(EditHotbar.idAt(selectedSlot)));
+        System.out.println("Hotbar: " + blockName(inventory.slot(selectedSlot).id()));
     }
 
     private void loadOrCreateWorld() {
@@ -261,6 +275,8 @@ public final class Main {
         try {
             SnapshotIO.Snapshot snapshot = SnapshotIO.load(path);
             blocks.applySnapshot(snapshot);
+            inventory = Inventory.restore(snapshot.inventory());
+            if (snapshot.version() < 6) System.out.println("Legacy save received one starter inventory.");
             if (snapshot.restoredFromBackup()) {
                 System.out.println("Restored world from the previous snapshot.");
             }
@@ -306,6 +322,7 @@ public final class Main {
                 handleHotbar();
                 handleEdit();
             } else {
+                if (focused && inventoryOpen) handleInventory();
                 cursorReady = false;
                 disarmPlayButtons();
                 scrollPending = 0;
@@ -368,7 +385,7 @@ public final class Main {
     }
 
     private boolean playing() {
-        return focused && !paused;
+        return focused && !paused && !inventoryOpen;
     }
 
     private void handleModeKeys() {
@@ -376,10 +393,21 @@ public final class Main {
             pauseEdge.disarm();
             quitEdge.disarm();
             saveEdge.disarm();
+            inventoryEdge.disarm();
+            disarmInventoryButtons();
             return;
         }
+        if (inventoryEdge.poll(key(GLFW_KEY_E)) && !paused) {
+            inventoryOpen = !inventoryOpen;
+            inventorySelection = selectedSlot;
+            cursorReady = false;
+            disarmPlayButtons();
+            disarmInventoryButtons();
+            updateCursorMode();
+        }
         if (pauseEdge.poll(key(GLFW_KEY_ESCAPE))) {
-            paused = !paused;
+            if (inventoryOpen) inventoryOpen = false;
+            else paused = !paused;
             cursorReady = false;
             disarmPlayButtons();
             updateCursorMode();
@@ -474,13 +502,13 @@ public final class Main {
             selectedSlot = EditHotbar.shift(selectedSlot, scrollPending);
             scrollPending = 0;
             if (selectedSlot != before) {
-                System.out.println("Hotbar " + (selectedSlot + 1) + " " + blockName(EditHotbar.idAt(selectedSlot)));
+                System.out.println("Hotbar " + (selectedSlot + 1) + " " + blockName(inventory.slot(selectedSlot).id()));
             }
         }
         for (int index = 0; index < EditHotbar.SLOTS; index++) {
             if (key(GLFW_KEY_1 + index) && selectedSlot != index) {
                 selectedSlot = index;
-                System.out.println("Hotbar " + (selectedSlot + 1) + " " + blockName(EditHotbar.idAt(selectedSlot)));
+                System.out.println("Hotbar " + (selectedSlot + 1) + " " + blockName(inventory.slot(selectedSlot).id()));
             }
         }
     }
@@ -513,11 +541,13 @@ public final class Main {
             System.out.println("Break rejected: reach");
             return;
         }
-        EditReceipt receipt = blocks.breakBlock(nextCommand++, hit.x(), hit.y(), hit.z(), hit.revision());
+        EditReceipt receipt = PlayerActions.breakBlock(blocks, inventory, nextCommand++, hit.x(), hit.y(), hit.z(), hit.revision());
         if (!receipt.accepted()) {
+            notice = receipt.reason().replace('_', ' ');
             System.out.println("Break rejected: " + explain(receipt.reason()));
             return;
         }
+        notice = "BLOCK COLLECTED";
         System.out.println("Removed " + hit.x() + " " + hit.y() + " " + hit.z());
         saveNow("break");
     }
@@ -534,20 +564,21 @@ public final class Main {
             return;
         }
         CellView cell = blocks.query(target[0], target[1], target[2]);
-        int id = EditHotbar.idAt(selectedSlot);
-        EditReceipt receipt = blocks.placeBlock(
-                nextCommand++,
+        int id = inventory.slot(selectedSlot).id();
+        EditReceipt receipt = PlayerActions.placeBlock(
+                blocks, inventory, selectedSlot, nextCommand++,
                 target[0],
                 target[1],
                 target[2],
-                id,
                 cell.revision(),
                 (x, y, z) -> PlayerBody.overlapsBlock(eyeX, eyeY, eyeZ, x, y, z)
         );
         if (!receipt.accepted()) {
+            notice = receipt.reason().replace('_', ' ');
             System.out.println("Place rejected: " + explain(receipt.reason()));
             return;
         }
+        notice = "BLOCK PLACED";
         System.out.println("Placed " + blockName(id) + " at " + target[0] + " " + target[1] + " " + target[2]);
         saveNow("place");
     }
@@ -568,7 +599,7 @@ public final class Main {
         }
         try {
             PlayerState player = new PlayerState(eyeX, eyeY, eyeZ, yaw, pitch, selectedSlot);
-            SnapshotIO.SaveResult result = SnapshotIO.save(worldPath(), blocks, player);
+            SnapshotIO.SaveResult result = SnapshotIO.save(worldPath(), blocks, player, inventory);
             if (blocks.dirty() || result.coveredLaterEdits()) {
                 System.out.println("Saved " + reason + " revision " + result.revision() + "; newer edits remain.");
             } else {
@@ -632,19 +663,103 @@ public final class Main {
             if (index == selectedSlot) {
                 drawQuad(x - 4, bottom - 4, size + 8, size + 8, SELECT_COLOR);
             }
-            drawQuad(x, bottom, size, size, colorOf(EditHotbar.idAt(index)));
+            Inventory.Stack stack = inventory.slot(index);
+            drawQuad(x, bottom, size, size, stack.count() == 0 ? new float[] {0.12f, 0.14f, 0.17f} : colorOf(stack.id()));
+            drawText(Integer.toString(index + 1), x + 2, bottom + size - 9, 1, WHITE);
+            if (stack.count() > 0) drawText(Integer.toString(stack.count()), x + 12, bottom + 3, 1, WHITE);
         }
-        int centerX = width / 2;
-        int centerY = height / 2;
-        drawQuad(centerX - 8, centerY - 1, 6, 2, CROSSHAIR_COLOR);
-        drawQuad(centerX + 2, centerY - 1, 6, 2, CROSSHAIR_COLOR);
-        drawQuad(centerX - 1, centerY + 2, 2, 6, CROSSHAIR_COLOR);
-        drawQuad(centerX - 1, centerY - 8, 2, 6, CROSSHAIR_COLOR);
+        drawText("E: INVENTORY   F5: SAVE   ESC: PAUSE", 12, height - 22, 1, WHITE);
+        drawText(blockName(inventory.slot(selectedSlot).id()), left, bottom + size + 12, 1, WHITE);
+        drawText(notice, 12, height - 38, 1, WHITE);
+        if (inventoryOpen) drawInventory(width, height);
+        if (!inventoryOpen) {
+            int centerX = width / 2;
+            int centerY = height / 2;
+            drawQuad(centerX - 8, centerY - 1, 6, 2, CROSSHAIR_COLOR);
+            drawQuad(centerX + 2, centerY - 1, 6, 2, CROSSHAIR_COLOR);
+            drawQuad(centerX - 1, centerY + 2, 2, 6, CROSSHAIR_COLOR);
+            drawQuad(centerX - 1, centerY - 8, 2, 6, CROSSHAIR_COLOR);
+        }
         if (paused) {
             drawQuad(0, height - 24, width, 24, PAUSE_COLOR);
+            drawText("PAUSED - ESC: RESUME   Q: QUIT", 12, height - 18, 1, WHITE);
         }
         GL11.glEnable(GL11.GL_DEPTH_TEST);
         GL11.glEnable(GL11.GL_CULL_FACE);
+    }
+
+    private void disarmInventoryButtons() {
+        inventoryClick.disarm(); sandstoneEdge.disarm(); bricksEdge.disarm();
+        for (ButtonEdge edge : slotEdges) edge.disarm();
+    }
+
+    private void handleInventory() {
+        if (inventoryClick.poll(mouse(GLFW_MOUSE_BUTTON_LEFT))) {
+            double[] mx = new double[1], my = new double[1];
+            glfwGetCursorPos(window, mx, my);
+            int[] ww = new int[1], wh = new int[1];
+            glfwGetWindowSize(window, ww, wh);
+            int[] fb = framebufferSize();
+            if (ww[0] > 0 && wh[0] > 0) {
+                double x = mx[0] * fb[0] / ww[0];
+                double y = fb[1] - my[0] * fb[1] / wh[0];
+                int left = (fb[0] - 540) / 2;
+                int top = (fb[1] + 300) / 2;
+                for (int index = 0; index < Inventory.SLOTS; index++) {
+                    int sx = left + 20 + index % 9 * 55;
+                    int sy = top - 90 - index / 9 * 50;
+                    if (x >= sx && x < sx + 44 && y >= sy && y < sy + 44) inventorySelection = index;
+                }
+            }
+        }
+        for (int i = 0; i < 9; i++) if (slotEdges[i].poll(key(GLFW_KEY_1 + i))) {
+            inventory.swap(inventorySelection, i);
+            notice = "HOTBAR UPDATED";
+            saveNow("inventory swap");
+        }
+        if (sandstoneEdge.poll(key(GLFW_KEY_C))) craft(Inventory.Recipe.SANDSTONE);
+        if (bricksEdge.poll(key(GLFW_KEY_V))) craft(Inventory.Recipe.STONE_BRICKS);
+    }
+
+    private void craft(Inventory.Recipe recipe) {
+        boolean crafted = inventory.craft(recipe);
+        notice = crafted ? "CRAFTED " + blockName(recipe.output) : "NEED MATERIALS OR INVENTORY SPACE";
+        if (crafted) saveNow("craft");
+    }
+
+    private void drawInventory(int width, int height) {
+        int left = (width - 540) / 2;
+        int top = (height + 300) / 2;
+        drawQuad(left, top - 300, 540, 300, new float[] {0.08f, 0.10f, 0.14f});
+        drawText("INVENTORY - E OR ESC TO CLOSE", left + 20, top - 25, 2, WHITE);
+        drawText("CLICK SLOT THEN 1-9 TO SWAP WITH HOTBAR", left + 20, top - 42, 1, WHITE);
+        for (int index = 0; index < Inventory.SLOTS; index++) {
+            int x = left + 20 + index % 9 * 55;
+            int y = top - 90 - index / 9 * 50;
+            if (index == inventorySelection) drawQuad(x - 2, y - 2, 48, 48, SELECT_COLOR);
+            Inventory.Stack stack = inventory.slot(index);
+            drawQuad(x, y, 44, 44, new float[] {0.18f, 0.20f, 0.24f});
+            if (stack.count() > 0) {
+                drawQuad(x + 7, y + 12, 28, 24, colorOf(stack.id()));
+                drawText(Integer.toString(stack.count()), x + 12, y + 3, 1, WHITE);
+            }
+            if (index < 9) drawText(Integer.toString(index + 1), x + 2, y + 34, 1, WHITE);
+        }
+        drawText(blockName(inventory.slot(inventorySelection).id()), left + 20, top - 215, 1, WHITE);
+        drawText("C: 4 SAND TO 1 SANDSTONE", left + 20, top - 239, 1,
+                inventory.count(BlockIds.SAND) >= 4 ? SELECT_COLOR : WHITE);
+        drawText("V: 4 STONE TO 4 STONE BRICKS", left + 20, top - 255, 1,
+                inventory.count(BlockIds.STONE) >= 4 ? SELECT_COLOR : WHITE);
+        drawText(notice, left + 20, top - 280, 1, WHITE);
+    }
+
+    private void drawText(String text, int x, int y, int scale, float[] color) {
+        for (int i = 0; i < text.length(); i++) for (int row = 0; row < 7; row++) {
+            int bits = PixelFont.row(text.charAt(i), row);
+            for (int column = 0; column < 5; column++) if ((bits & (1 << (4 - column))) != 0) {
+                drawQuad(x + (i * 6 + column) * scale, y + (6 - row) * scale, scale, scale, color);
+            }
+        }
     }
 
     private void drawQuad(int x, int y, int width, int height, float[] color) {
@@ -1068,6 +1183,8 @@ public final class Main {
     }
 
     private static float[] colorOf(int id) {
+        if (id == BlockIds.SANDSTONE) return new float[] {0.77f, 0.65f, 0.41f};
+        if (id == BlockIds.STONE_BRICKS) return new float[] {0.40f, 0.44f, 0.48f};
         if (id == BlockIds.SAND) return SAND_COLOR;
         if (id == BlockIds.GRASS) {
             return GRASS_COLOR;
@@ -1095,6 +1212,9 @@ public final class Main {
 
     private static String blockName(int id) {
         return switch (id) {
+            case BlockIds.AIR -> "empty";
+            case BlockIds.SANDSTONE -> "sandstone";
+            case BlockIds.STONE_BRICKS -> "stone bricks";
             case BlockIds.SAND -> "sand";
             case BlockIds.GRASS -> "grass";
             case BlockIds.DIRT -> "dirt";
@@ -1124,6 +1244,8 @@ public final class Main {
 
     private static String explain(String reason) {
         return switch (reason) {
+            case "inventory_full" -> "INVENTORY FULL";
+            case "no_items" -> "EMPTY SLOT - COLLECT BLOCKS FIRST";
             case "duplicate" -> "重复操作";
             case "outside" -> "世界范围外";
             case "unloaded" -> "区块未加载";
