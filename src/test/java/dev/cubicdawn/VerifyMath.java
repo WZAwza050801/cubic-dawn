@@ -4,6 +4,8 @@ import dev.cubicdawn.world.Aabb;
 import dev.cubicdawn.world.BlockIds;
 import dev.cubicdawn.world.BlockTicks;
 import dev.cubicdawn.world.Inventory;
+import dev.cubicdawn.world.ItemIds;
+import dev.cubicdawn.world.MiningProgress;
 import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.BlockWorld;
 import dev.cubicdawn.world.ButtonEdge;
@@ -41,6 +43,9 @@ public final class VerifyMath {
         verify.saves();
         verify.fallingSand();
         verify.inventory();
+        verify.trees();
+        verify.woodCrafting();
+        verify.mining();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
@@ -785,6 +790,139 @@ public final class VerifyMath {
         boolean built = PlayerActions.placeBlock(world, emptyBag, 0, 300, 1, 1, 0, 0, null).accepted();
         check("INV_LOOP", made && built && emptyBag.count(BlockIds.STONE_BRICKS) == 3
                 && world.getId(1, 1, 0) == BlockIds.STONE_BRICKS, "collect craft build loop");
+    }
+
+    private void trees() {
+        BlockWorld first = BlockWorld.generateForestIsland();
+        BlockWorld second = BlockWorld.generateForestIsland();
+        check("TREE_SEED", first.sameSolids(second) && first.countSolid() == 1764 + 42
+                && first.getId(-5, BlockWorld.surface(-5, -4) + 1, -4) == BlockIds.LOG, "tree generation");
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.DIRT, 0, null);
+        world.placeBlock(2, 1, 3, 0, BlockIds.STONE, 0, null);
+        int before = world.mutations();
+        check("TREE_BUILDING", !world.plantTree(3, 0, 1, 0, null).accepted()
+                && world.mutations() == before && world.getId(1, 3, 0) == BlockIds.STONE, "overwrote building");
+        world.breakBlock(4, 1, 3, 0, world.query(1, 3, 0).revision());
+        before = world.mutations();
+        check("TREE_BODY", !world.plantTree(5, 0, 1, 0, (x,y,z) -> y == 4).accepted()
+                && before == world.mutations(), "buried player");
+        world.setSimulationLoaded(1, 3, 0, false);
+        check("TREE_UNLOADED", !world.plantTree(6, 0, 1, 0, null).accepted(), "unloaded footprint");
+        world.setSimulationLoaded(1, 3, 0, true);
+        check("TREE_PLANT", world.plantTree(7, 0, 1, 0, null).accepted() && world.countSolid() == 22
+                && !world.plantTree(7, 0, 1, 0, null).accepted(), "tree or duplicate");
+        BlockWorld edge = BlockWorld.empty();
+        edge.placeBlock(1, 16, 0, 0, BlockIds.DIRT, 0, null);
+        check("TREE_BOUNDARY", !edge.plantTree(2, 16, 1, 0, null).accepted() && edge.countSolid() == 1, "boundary overwrite");
+    }
+
+    private void woodCrafting() throws Exception {
+        Inventory bag = new Inventory();
+        bag.add(BlockIds.LOG, 4);
+        check("WOOD_PLANKS", bag.craft(Inventory.Recipe.PLANKS) && bag.count(BlockIds.PLANKS) == 4, "log recipe");
+        bag.craft(Inventory.Recipe.PLANKS);
+        bag.craft(Inventory.Recipe.STICKS);
+        check("WOOD_STICKS", bag.count(ItemIds.STICK) == 4 && bag.count(BlockIds.PLANKS) == 6, "stick recipe");
+        var before = bag.snapshot();
+        check("TOOL_BENCH_GATE", !bag.craft(Inventory.Recipe.PICKAXE) && before.equals(bag.snapshot()), "no bench consumed material");
+        check("TOOL_MULTIPLE_INPUTS", bag.craft(Inventory.Recipe.PICKAXE, true)
+                && bag.count(BlockIds.PLANKS) == 3 && bag.count(ItemIds.STICK) == 2
+                && bag.count(ItemIds.WOOD_PICKAXE) == 1, "multi-input crafting");
+        bag.add(ItemIds.WOOD_PICKAXE, 2);
+        check("TOOL_NONSTACK", bag.snapshot().stream().filter(t -> t.id() == ItemIds.WOOD_PICKAXE).count() == 3
+                && bag.snapshot().stream().filter(t -> ItemIds.tool(t.id())).allMatch(t -> t.count() == 1), "tool stacking");
+        Inventory incomplete = new Inventory(); incomplete.add(BlockIds.PLANKS, 3);
+        var unchanged = incomplete.snapshot();
+        check("TOOL_MISSING_INPUT", !incomplete.craft(Inventory.Recipe.AXE, true)
+                && unchanged.equals(incomplete.snapshot()), "partial recipe consumed planks");
+        Inventory full = new Inventory();
+        full.add(BlockIds.PLANKS, 64); full.add(ItemIds.STICK, 64); full.add(BlockIds.DIRT, 25 * 64);
+        var packed = full.snapshot();
+        check("TOOL_FULL_ROLLBACK", !full.craft(Inventory.Recipe.PICKAXE, true)
+                && packed.equals(full.snapshot()), "multi-input failure partially consumed materials");
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.WORKBENCH, 0, null);
+        check("BENCH_DISTANCE", world.nearWorkbench(3, 0, 0) && !world.nearWorkbench(3.01f, 0, 0), "bench radius");
+        world.setSimulationLoaded(0, 0, 0, false);
+        check("BENCH_UNLOADED", !world.nearWorkbench(0, 0, 0), "unloaded bench granted access");
+        world.setSimulationLoaded(0, 0, 0, true);
+        int toolSlot = 0;
+        for (int i = 0; i < Inventory.SLOTS; i++) if (ItemIds.tool(bag.slot(i).id())) { toolSlot = i; break; }
+        int toolCount = bag.count(ItemIds.WOOD_PICKAXE);
+        check("TOOL_NOT_BLOCK", !PlayerActions.placeBlock(world, bag, toolSlot, 99, 1, 0, 0, 0, null).accepted()
+                && bag.count(ItemIds.WOOD_PICKAXE) == toolCount, "tool was placed or consumed");
+        Path file = Files.createTempDirectory("cubic-dawn-tools").resolve("world.txt");
+        SnapshotIO.save(file, world, null, bag);
+        check("TOOL_SAVE", SnapshotIO.load(file).inventory().equals(bag.snapshot()), "tool save");
+        Inventory seeds = new Inventory(); seeds.add(BlockIds.DIRT, 4);
+        check("SAPLING_RECIPE", seeds.craft(Inventory.Recipe.SAPLING) && seeds.count(ItemIds.SAPLING) == 1, "old-island recipe");
+        world.placeBlock(2, 5, 0, 0, BlockIds.DIRT, 0, null);
+        int slot = 0;
+        check("SAPLING_PLACE", PlayerActions.placeBlock(world, seeds, slot, 3, 5, 1, 0, 0, null).accepted()
+                && seeds.count(ItemIds.SAPLING) == 0 && world.getId(5, 1, 0) == BlockIds.LOG, "planting transaction");
+        seeds.add(ItemIds.SAPLING, 1);
+        check("SAPLING_FAIL", !PlayerActions.placeBlock(world, seeds, 0, 4, 8, 1, 0, 0, null).accepted()
+                && seeds.count(ItemIds.SAPLING) == 1, "failed planting consumed seed");
+        BlockWorld forest = BlockWorld.empty(); forest.placeBlock(1,0,0,0,BlockIds.DIRT,0,null);
+        Inventory renewable = new Inventory(); renewable.add(BlockIds.DIRT,4);
+        renewable.craft(Inventory.Recipe.SAPLING);
+        PlayerActions.placeBlock(forest,renewable,0,2,0,1,0,0,null);
+        java.util.List<int[]> harvested = new java.util.ArrayList<>();
+        forest.forEachSolid((x,y,z,id) -> { if(id==BlockIds.LOG || id==BlockIds.LEAVES) harvested.add(new int[]{x,y,z}); });
+        long command = 3;
+        for (int[] cell : harvested) PlayerActions.breakBlock(forest,renewable,command++,cell[0],cell[1],cell[2],
+                forest.query(cell[0],cell[1],cell[2]).revision());
+        boolean regrown = renewable.craft(Inventory.Recipe.SAPLING_FROM_LEAVES);
+        int seedSlot = 0;
+        for (int i=0;i<Inventory.SLOTS;i++) if(renewable.slot(i).id()==ItemIds.SAPLING) seedSlot=i;
+        regrown &= PlayerActions.placeBlock(forest,renewable,seedSlot,command,0,1,0,
+                forest.query(0,1,0).revision(),null).accepted();
+        check("TREE_RENEWABLE_LOOP", regrown && renewable.count(BlockIds.LOG)==3
+                && renewable.count(BlockIds.LEAVES)==14 && forest.countSolid()==22, "harvest and replant loop");
+
+    }
+
+    private void mining() {
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.STONE, 0, null);
+        VoxelRay.Hit hit = VoxelRay.castFromEngineEye(0, 0, 2, 0, 0, -1, 5, world);
+        MiningProgress progress = new MiningProgress();
+        int ticks = 0;
+        while (!progress.advance(1f/60, true, hit, 0, 0) && ticks < 200) ticks++;
+        check("MINE_HAND", ticks + 1 == 108, "hand ticks=" + (ticks + 1));
+        ticks = 0;
+        while (!progress.advance(1f/60, true, hit, 0, ItemIds.WOOD_PICKAXE) && ticks < 200) ticks++;
+        check("MINE_PICKAXE", ticks + 1 == 36, "tool ticks=" + (ticks + 1));
+        progress.advance(.3f, true, hit, 0, 0);
+        progress.advance(.1f, false, hit, 0, 0);
+        check("MINE_RELEASE", progress.fraction() == 0, "release kept progress");
+        progress.advance(.3f, true, hit, 0, 0);
+        progress.advance(.1f, true, hit, 1, 0);
+        check("MINE_SLOT", progress.fraction() < .06f, "slot change kept progress");
+        progress.advance(.3f, true, hit, 1, 0);
+        world.breakBlock(2, 0, 0, 0, world.query(0, 0, 0).revision());
+        world.placeBlock(3, 0, 0, 0, BlockIds.STONE, world.query(0, 0, 0).revision(), null);
+        var changed = VoxelRay.castFromEngineEye(0, 0, 2, 0, 0, -1, 5, world);
+        progress.advance(.1f, true, changed, 1, 0);
+        check("MINE_REVISION", progress.fraction() < .06f, "replacement inherited progress");
+        progress.reset();
+        check("MINE_PAUSE", progress.fraction() == 0, "pause reset");
+        check("MINE_MATCHED_TOOL", MiningProgress.secondsFor(BlockIds.LOG, ItemIds.WOOD_AXE) == .3f
+                && MiningProgress.secondsFor(BlockIds.LOG, ItemIds.WOOD_PICKAXE) == .9f
+                && MiningProgress.secondsFor(BlockIds.DIRT, ItemIds.WOOD_SHOVEL) == .15f,
+                "tool material matching");
+        int completed = -1;
+        boolean same = true;
+        for (int fps : new int[] {30, 60, 120, 144}) {
+            FixedStep clock = new FixedStep(); MiningProgress mine = new MiningProgress();
+            int[] successes = {0};
+            for (int frame = 0; frame < fps * 3; frame++) clock.advance(1.0/fps, true, false,
+                    (seconds,jump) -> { if (mine.advance(seconds,true,changed,0,ItemIds.WOOD_PICKAXE)) successes[0]++; });
+            if (completed < 0) completed = successes[0];
+            same &= successes[0] == completed;
+        }
+        check("MINE_FRAMERATES", same && completed == 5, "rate changed mining completions");
     }
 
     private void check(String id, boolean passed, String detail) {

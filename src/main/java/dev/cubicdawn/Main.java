@@ -8,6 +8,8 @@ import dev.cubicdawn.world.EditHotbar;
 import dev.cubicdawn.world.EditReceipt;
 import dev.cubicdawn.world.FixedStep;
 import dev.cubicdawn.world.Inventory;
+import dev.cubicdawn.world.ItemIds;
+import dev.cubicdawn.world.MiningProgress;
 import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.PlayerBody;
 import dev.cubicdawn.world.PlayerMotion;
@@ -116,6 +118,12 @@ public final class Main {
     private boolean focused = true;
     private boolean paused;
     private boolean inventoryOpen;
+    private final MiningProgress mining = new MiningProgress();
+    private boolean miningArmed = true;
+    private int recipeSelection;
+    private final ButtonEdge recipeUp = new ButtonEdge();
+    private final ButtonEdge recipeDown = new ButtonEdge();
+    private final ButtonEdge recipeCraft = new ButtonEdge();
     private int inventorySelection;
     private Inventory inventory = Inventory.starter();
     private String notice = "E: INVENTORY AND CRAFTING";
@@ -132,7 +140,6 @@ public final class Main {
     private long nextCommand = 1L;
     private String lastAimText = "";
     private BlockWorld blocks;
-    private final ButtonEdge leftEdge = new ButtonEdge();
     private final ButtonEdge rightEdge = new ButtonEdge();
     private final FixedStep simulation = new FixedStep();
     private final ButtonEdge jumpEdge = new ButtonEdge();
@@ -203,7 +210,7 @@ public final class Main {
         System.out.println("Java: " + System.getProperty("java.version"));
         System.out.println("LWJGL: " + Version.getVersion());
         System.out.println("OpenGL: " + GL11.glGetString(GL11.GL_VERSION));
-        System.out.println("Left collect, right place, 1-9 or wheel selects, E inventory, Esc pauses, Q quits while paused, F5 saves.");
+        System.out.println("Hold left to collect, right place or plant, 1-9 or wheel selects, E inventory, Esc pauses, Q quits while paused, F5 saves.");
         System.out.println("Slot 8: sand falls one cell every 6 simulation ticks; project sandbox rule.");
         System.out.println("Java Edition mechanics version: not set. Finite starter materials and project crafting rules.");
 
@@ -221,8 +228,8 @@ public final class Main {
         quadVao = quadMesh[0];
         quadVbo = quadMesh[1];
 
-        blocks = BlockWorld.generateIsland();
-        blocks.checkGeneratedIsland();
+        BlockWorld.generateIsland().checkGeneratedIsland();
+        blocks = BlockWorld.generateForestIsland();
         BlockWorld roundTrip = BlockWorld.empty();
         roundTrip.applySnapshot(SnapshotIO.parse(SnapshotIO.encode(blocks, null, blocks.revision(), inventory)));
         if (!roundTrip.sameSolids(blocks)) {
@@ -318,8 +325,8 @@ public final class Main {
             lastFrameTime = now;
             if (playing()) {
                 updateLook();
-                updateMove(frameSeconds);
                 handleHotbar();
+                updateMove(frameSeconds);
                 handleEdit();
             } else {
                 if (focused && inventoryOpen) handleInventory();
@@ -422,9 +429,10 @@ public final class Main {
     }
 
     private void disarmPlayButtons() {
+        mining.reset();
+        miningArmed = false;
         simulation.reset();
         lastFrameTime = glfwGetTime();
-        leftEdge.disarm();
         rightEdge.disarm();
         jumpEdge.disarm();
     }
@@ -489,6 +497,13 @@ public final class Main {
         simulation.advance(frameSeconds, true, jump, (seconds, jumpPressed) -> {
             PlayerMotion.step(pose, seconds, inputX, inputZ, jumpPressed, blocks::isSolidAt);
             blocks.tick((x, y, z) -> PlayerBody.overlapsBlock(pose.x, pose.y, pose.z, x, y, z));
+            eyeX = pose.x; eyeY = pose.y; eyeZ = pose.z; velocityY = pose.velocityY;
+            boolean held = mouse(GLFW_MOUSE_BUTTON_LEFT);
+            if (!held) miningArmed = true;
+            VoxelRay.Hit hit = aim();
+            if (mining.advance(seconds, held && miningArmed, hit, selectedSlot, inventory.slot(selectedSlot).id())) {
+                breakAimed(hit);
+            }
         });
         eyeX = pose.x;
         eyeY = pose.y;
@@ -519,9 +534,6 @@ public final class Main {
         if (!text.equals(lastAimText)) {
             lastAimText = text;
             System.out.println(text);
-        }
-        if (leftEdge.poll(mouse(GLFW_MOUSE_BUTTON_LEFT))) {
-            breakAimed(hit);
         }
         if (rightEdge.poll(mouse(GLFW_MOUSE_BUTTON_RIGHT))) {
             placeAimed(hit);
@@ -670,6 +682,10 @@ public final class Main {
         }
         drawText("E: INVENTORY   F5: SAVE   ESC: PAUSE", 12, height - 22, 1, WHITE);
         drawText(blockName(inventory.slot(selectedSlot).id()), left, bottom + size + 12, 1, WHITE);
+        if (mining.fraction() > 0 && !inventoryOpen) {
+            drawQuad(width / 2 - 80, height / 2 - 30, 160, 6, PAUSE_COLOR);
+            drawQuad(width / 2 - 80, height / 2 - 30, Math.round(160 * mining.fraction()), 6, SELECT_COLOR);
+        }
         drawText(notice, 12, height - 38, 1, WHITE);
         if (inventoryOpen) drawInventory(width, height);
         if (!inventoryOpen) {
@@ -690,6 +706,7 @@ public final class Main {
 
     private void disarmInventoryButtons() {
         inventoryClick.disarm(); sandstoneEdge.disarm(); bricksEdge.disarm();
+        recipeUp.disarm(); recipeDown.disarm(); recipeCraft.disarm();
         for (ButtonEdge edge : slotEdges) edge.disarm();
     }
 
@@ -707,7 +724,7 @@ public final class Main {
                 int top = (fb[1] + 300) / 2;
                 for (int index = 0; index < Inventory.SLOTS; index++) {
                     int sx = left + 20 + index % 9 * 55;
-                    int sy = top - 90 - index / 9 * 50;
+                    int sy = top - 102 - index / 9 * 50;
                     if (x >= sx && x < sx + 44 && y >= sy && y < sy + 44) inventorySelection = index;
                 }
             }
@@ -717,12 +734,17 @@ public final class Main {
             notice = "HOTBAR UPDATED";
             saveNow("inventory swap");
         }
+        if (recipeUp.poll(key(GLFW_KEY_UP))) recipeSelection = Math.floorMod(recipeSelection - 1, Inventory.Recipe.values().length);
+        if (recipeDown.poll(key(GLFW_KEY_DOWN))) recipeSelection = (recipeSelection + 1) % Inventory.Recipe.values().length;
+        if (recipeCraft.poll(key(GLFW_KEY_ENTER))) craft(Inventory.Recipe.values()[recipeSelection]);
         if (sandstoneEdge.poll(key(GLFW_KEY_C))) craft(Inventory.Recipe.SANDSTONE);
         if (bricksEdge.poll(key(GLFW_KEY_V))) craft(Inventory.Recipe.STONE_BRICKS);
     }
 
     private void craft(Inventory.Recipe recipe) {
-        boolean crafted = inventory.craft(recipe);
+        boolean nearBench = blocks.nearWorkbench(eyeX, eyeY, eyeZ);
+        if (recipe.needsBench && !nearBench) { notice = "NEED A WORKBENCH WITHIN 3 BLOCKS"; return; }
+        boolean crafted = inventory.craft(recipe, nearBench);
         notice = crafted ? "CRAFTED " + blockName(recipe.output) : "NEED MATERIALS OR INVENTORY SPACE";
         if (crafted) saveNow("craft");
     }
@@ -733,9 +755,10 @@ public final class Main {
         drawQuad(left, top - 300, 540, 300, new float[] {0.08f, 0.10f, 0.14f});
         drawText("INVENTORY - E OR ESC TO CLOSE", left + 20, top - 25, 2, WHITE);
         drawText("CLICK SLOT THEN 1-9 TO SWAP WITH HOTBAR", left + 20, top - 42, 1, WHITE);
+        drawText("UP/DOWN: RECIPE  ENTER: CRAFT  C/V: QUICK", left + 20, top - 55, 1, WHITE);
         for (int index = 0; index < Inventory.SLOTS; index++) {
             int x = left + 20 + index % 9 * 55;
-            int y = top - 90 - index / 9 * 50;
+            int y = top - 102 - index / 9 * 50;
             if (index == inventorySelection) drawQuad(x - 2, y - 2, 48, 48, SELECT_COLOR);
             Inventory.Stack stack = inventory.slot(index);
             drawQuad(x, y, 44, 44, new float[] {0.18f, 0.20f, 0.24f});
@@ -746,10 +769,13 @@ public final class Main {
             if (index < 9) drawText(Integer.toString(index + 1), x + 2, y + 34, 1, WHITE);
         }
         drawText(blockName(inventory.slot(inventorySelection).id()), left + 20, top - 215, 1, WHITE);
-        drawText("C: 4 SAND TO 1 SANDSTONE", left + 20, top - 239, 1,
-                inventory.count(BlockIds.SAND) >= 4 ? SELECT_COLOR : WHITE);
-        drawText("V: 4 STONE TO 4 STONE BRICKS", left + 20, top - 255, 1,
-                inventory.count(BlockIds.STONE) >= 4 ? SELECT_COLOR : WHITE);
+        Inventory.Recipe recipe = Inventory.Recipe.values()[recipeSelection];
+        drawText("MAKE: " + recipe.amount + " " + blockName(recipe.output)
+                + (recipe.needsBench ? " (BENCH)" : ""), left + 20, top - 239, 1, SELECT_COLOR);
+        StringBuilder needs = new StringBuilder("NEED: ");
+        for (Inventory.Ingredient input : recipe.ingredients) needs.append(input.amount()).append(" ")
+                .append(blockName(input.id())).append("  ");
+        drawText(needs.toString(), left + 20, top - 255, 1, WHITE);
         drawText(notice, left + 20, top - 280, 1, WHITE);
     }
 
@@ -1183,6 +1209,11 @@ public final class Main {
     }
 
     private static float[] colorOf(int id) {
+        if (id == BlockIds.LOG) return new float[] {0.43f, 0.26f, 0.12f};
+        if (id == BlockIds.LEAVES || id == ItemIds.SAPLING) return new float[] {0.21f, 0.51f, 0.15f};
+        if (id == BlockIds.PLANKS) return new float[] {0.72f, 0.53f, 0.30f};
+        if (id == BlockIds.WORKBENCH) return new float[] {0.57f, 0.35f, 0.16f};
+        if (ItemIds.tool(id) || id == ItemIds.STICK) return new float[] {0.64f, 0.44f, 0.23f};
         if (id == BlockIds.SANDSTONE) return new float[] {0.77f, 0.65f, 0.41f};
         if (id == BlockIds.STONE_BRICKS) return new float[] {0.40f, 0.44f, 0.48f};
         if (id == BlockIds.SAND) return SAND_COLOR;
@@ -1212,6 +1243,15 @@ public final class Main {
 
     private static String blockName(int id) {
         return switch (id) {
+            case BlockIds.LOG -> "log";
+            case BlockIds.LEAVES -> "leaves";
+            case BlockIds.PLANKS -> "planks";
+            case BlockIds.WORKBENCH -> "workbench";
+            case ItemIds.STICK -> "stick";
+            case ItemIds.SAPLING -> "sapling";
+            case ItemIds.WOOD_PICKAXE -> "wood pickaxe";
+            case ItemIds.WOOD_AXE -> "wood axe";
+            case ItemIds.WOOD_SHOVEL -> "wood shovel";
             case BlockIds.AIR -> "empty";
             case BlockIds.SANDSTONE -> "sandstone";
             case BlockIds.STONE_BRICKS -> "stone bricks";

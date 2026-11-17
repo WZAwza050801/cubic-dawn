@@ -16,7 +16,11 @@ public final class PlayerActions {
                                          int x, int y, int z, int expectedRevision, PlayerBody.SolidAt body) {
         Inventory.Stack stack = inventory.slot(slot);
         if (stack.count() == 0) return EditReceipt.reject("no_items");
-        EditReceipt result = world.placeBlock(command, x, y, z, stack.id(), expectedRevision, body);
+        EditReceipt result;
+        if (stack.id() == ItemIds.SAPLING) {
+            if (world.query(x, y, z).revision() != expectedRevision) return EditReceipt.reject("stale");
+            result = world.plantTree(command, x, y, z, body);
+        } else result = world.placeBlock(command, x, y, z, stack.id(), expectedRevision, body);
         if (result.accepted()) inventory.remove(slot, 1);
         return result;
     }

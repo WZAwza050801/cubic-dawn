@@ -51,6 +51,42 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         return world;
     }
 
+    public static BlockWorld generateForestIsland() {
+        BlockWorld world = generateIsland();
+        world.plantTree(-1, -5, surface(-5, -4) + 1, -4, null);
+        world.plantTree(-2, 5, surface(5, -5) + 1, -5, null);
+        return world;
+    }
+
+    /** Validate the complete footprint before changing anything; never overwrite buildings. */
+    public EditReceipt plantTree(long command, int x, int y, int z, PlayerBody.SolidAt body) {
+        if (acceptedCommands.contains(command)) return EditReceipt.reject("duplicate");
+        CellView ground = query(x, y - 1, z);
+        if (ground.kind() != CellKind.KNOWN || (ground.id() != BlockIds.GRASS && ground.id() != BlockIds.DIRT)) {
+            return EditReceipt.reject("tree_needs_soil");
+        }
+        java.util.List<int[]> cells = new java.util.ArrayList<>();
+        for (int dy = 0; dy < 3; dy++) cells.add(new int[] {x, y + dy, z, BlockIds.LOG});
+        for (int dy = 2; dy <= 3; dy++) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            if (dy == 2 && dx == 0 && dz == 0) continue;
+            cells.add(new int[] {x + dx, y + dy, z + dz, BlockIds.LEAVES});
+        }
+        cells.add(new int[] {x, y + 4, z, BlockIds.LEAVES});
+        for (int[] cell : cells) {
+            CellView view = query(cell[0], cell[1], cell[2]);
+            if (view.kind() != CellKind.KNOWN || view.id() != BlockIds.AIR) return EditReceipt.reject("tree_needs_space");
+            if (body != null && body.solid(cell[0], cell[1], cell[2])) return EditReceipt.reject("player_overlap");
+        }
+        for (int[] cell : cells) {
+            CellView view = query(cell[0], cell[1], cell[2]);
+            put(cell[0], cell[1], cell[2], cell[3], view.revision() + 1);
+        }
+        revision++;
+        dirty = true;
+        acceptedCommands.add(command);
+        return EditReceipt.ok(revision);
+    }
+
     public void checkGeneratedIsland() {
         if (countSolid() != 21 * 21 * COLUMN_THICKNESS) {
             throw new IllegalStateException("Expected 1764 generated blocks.");
@@ -219,6 +255,18 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         revision = snapshot.revision() == null ? 1L : snapshot.revision();
         dirty = false;
         acceptedCommands.clear();
+    }
+
+    public boolean nearWorkbench(float x, float y, float z) {
+        for (int bx = (int) Math.floor(x - 3); bx <= Math.ceil(x + 3); bx++)
+            for (int by = (int) Math.floor(y - 3); by <= Math.ceil(y + 3); by++)
+                for (int bz = (int) Math.floor(z - 3); bz <= Math.ceil(z + 3); bz++) {
+                    float dx = bx - x, dy = by - y, dz = bz - z;
+                    CellView cell = query(bx, by, bz);
+                    if (dx * dx + dy * dy + dz * dz <= 9 && cell.kind() == CellKind.KNOWN
+                            && cell.id() == BlockIds.WORKBENCH) return true;
+                }
+        return false;
     }
 
     public BlockTicks blockTicks() { return blockTicks; }
