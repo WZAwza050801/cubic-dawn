@@ -20,6 +20,7 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
     private final int[] revisions = new int[SPAN * SPAN * SPAN];
     private final boolean[] unloaded = new boolean[SPAN * SPAN * SPAN];
     private final HashSet<Long> acceptedCommands = new HashSet<>();
+    private final BlockTicks blockTicks = new BlockTicks();
     private long revision;
     private boolean dirty;
     private int mutations;
@@ -146,7 +147,9 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         if (view.id() == BlockIds.AIR) {
             return EditReceipt.reject("not_solid");
         }
+        blockTicks.cancel(x, y, z);
         put(x, y, z, BlockIds.AIR, view.revision() + 1);
+        scheduleSand(x, y + 1, z);
         acceptedCommands.add(commandId);
         revision++;
         dirty = true;
@@ -187,7 +190,10 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         if (body != null && body.solid(x, y, z)) {
             return EditReceipt.reject("player_overlap");
         }
+        blockTicks.cancel(x, y, z);
         put(x, y, z, id, view.revision() + 1);
+        scheduleSand(x, y, z);
+        scheduleSand(x, y + 1, z);
         acceptedCommands.add(commandId);
         revision++;
         dirty = true;
@@ -200,6 +206,7 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
     }
 
     public void applySnapshot(SnapshotIO.Snapshot snapshot) {
+        blockTicks.restore(snapshot.simulationTick(), snapshot.tasks());
         for (int i = 0; i < ids.length; i++) {
             ids[i] = BlockIds.AIR;
             revisions[i] = 0;
@@ -212,6 +219,42 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         revision = snapshot.revision() == null ? 1L : snapshot.revision();
         dirty = false;
         acceptedCommands.clear();
+    }
+
+    public BlockTicks blockTicks() { return blockTicks; }
+
+    private void scheduleSand(int x, int y, int z) {
+        CellView cell = query(x, y, z);
+        if (cell.kind() == CellKind.KNOWN && cell.id() == BlockIds.SAND) {
+            blockTicks.schedule(x, y, z);
+        }
+    }
+
+    /** One atomic cell move. Unknown space and the player's body block falling. */
+    public void tick(PlayerBody.SolidAt body) {
+        for (BlockTicks.Task task : blockTicks.advance()) {
+            int x = task.x(), y = task.y(), z = task.z();
+            CellView source = query(x, y, z);
+            CellView below = query(x, y - 1, z);
+            if (source.kind() == CellKind.UNLOADED) {
+                blockTicks.schedule(x, y, z);
+                continue;
+            }
+            if (source.kind() != CellKind.KNOWN || source.id() != BlockIds.SAND) continue;
+            if (below.kind() == CellKind.UNLOADED
+                    || (below.kind() == CellKind.KNOWN && below.id() == BlockIds.AIR
+                        && body != null && body.solid(x, y - 1, z))) {
+                blockTicks.schedule(x, y, z);
+                continue;
+            }
+            if (below.kind() != CellKind.KNOWN || below.id() != BlockIds.AIR) continue;
+            put(x, y, z, BlockIds.AIR, source.revision() + 1);
+            put(x, y - 1, z, BlockIds.SAND, below.revision() + 1);
+            revision++;
+            dirty = true;
+            scheduleSand(x, y - 1, z);
+            scheduleSand(x, y + 1, z);
+        }
     }
 
     public int countSolid() {

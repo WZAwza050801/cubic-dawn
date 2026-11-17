@@ -22,6 +22,8 @@ public final class SnapshotIO {
     public static final String HEADER_V3 = "cubic-dawn-blocks 3";
     public static final String HEADER_V4 = "cubic-dawn-blocks 4";
 
+    public static final String HEADER_V5 = "cubic-dawn-blocks 5";
+
     private SnapshotIO() {
     }
 
@@ -32,6 +34,8 @@ public final class SnapshotIO {
             PlayerState player,
             List<int[]> blocks,
             List<Integer> unknownIds,
+            long simulationTick,
+            List<BlockTicks.Task> tasks,
             boolean restoredFromBackup
     ) {
     }
@@ -41,7 +45,11 @@ public final class SnapshotIO {
 
     public static String encode(BlockWorld world, PlayerState player, long revision) {
         List<String> lines = new ArrayList<>();
-        lines.add(HEADER_V4);
+        lines.add(HEADER_V5);
+        lines.add("tick " + world.blockTicks().tick());
+        for (BlockTicks.Task task : world.blockTicks().tasks()) {
+            lines.add("fall " + task.due() + " " + task.x() + " " + task.y() + " " + task.z());
+        }
         lines.add("seed " + BlockWorld.SEED);
         lines.add("revision " + revision);
         if (player != null) {
@@ -68,7 +76,7 @@ public final class SnapshotIO {
         if (HEADER_V3.equals(header)) {
             return parseBody(3, lines.subList(1, lines.size()), false);
         }
-        if (!HEADER_V4.equals(header)) {
+        if (!HEADER_V4.equals(header) && !HEADER_V5.equals(header)) {
             throw new IllegalStateException("Unrecognized save header: " + header);
         }
         String checksum = null;
@@ -94,7 +102,7 @@ public final class SnapshotIO {
         if (!checksum.equals(actual)) {
             throw new IllegalStateException("Save checksum does not match the file contents.");
         }
-        return parseBody(4, body, false);
+        return parseBody(HEADER_V5.equals(header) ? 5 : 4, body, false);
     }
 
     public static SaveResult save(Path path, BlockWorld world, PlayerState player) throws IOException {
@@ -120,6 +128,8 @@ public final class SnapshotIO {
                     snapshot.player(),
                     snapshot.blocks(),
                     snapshot.unknownIds(),
+                    snapshot.simulationTick(),
+                    snapshot.tasks(),
                     true
             );
         }
@@ -150,6 +160,8 @@ public final class SnapshotIO {
     }
 
     private static Snapshot parseBody(int version, List<String> lines, boolean fromBackup) {
+        Long tick = null;
+        List<BlockTicks.Task> tasks = new ArrayList<>();
         Integer seed = null;
         Long revision = null;
         PlayerState player = null;
@@ -157,6 +169,18 @@ public final class SnapshotIO {
         List<Integer> unknownIds = new ArrayList<>();
         HashSetPositions seen = new HashSetPositions();
         for (String line : lines) {
+            if (version == 5 && line.startsWith("tick ")) {
+                if (tick != null) throw new IllegalStateException("Duplicate simulation tick");
+                tick = Long.valueOf(line.substring(5));
+                continue;
+            }
+            if (version == 5 && line.startsWith("fall ")) {
+                String[] fields = line.split(" ");
+                if (fields.length != 5) throw new IllegalStateException("Bad fall task");
+                tasks.add(new BlockTicks.Task(Long.parseLong(fields[1]), Integer.parseInt(fields[2]),
+                        Integer.parseInt(fields[3]), Integer.parseInt(fields[4])));
+                continue;
+            }
             if (line.startsWith("seed ")) {
                 seed = Integer.valueOf(line.substring(5).trim());
                 continue;
@@ -201,7 +225,11 @@ public final class SnapshotIO {
             }
             blocks.add(new int[] {x, y, z, id});
         }
-        return new Snapshot(version, seed, revision, player, blocks, unknownIds, fromBackup);
+        if (version == 5 && tick == null) throw new IllegalStateException("Missing simulation tick");
+        BlockTicks validated = new BlockTicks();
+        validated.restore(tick == null ? 0 : tick, tasks);
+        return new Snapshot(version, seed, revision, player, blocks, unknownIds,
+                validated.tick(), validated.tasks(), fromBackup);
     }
 
     private static PlayerState parsePlayer(String text) {

@@ -1,11 +1,11 @@
 Project: Cubic Dawn / 方块黎明
-Phase: P0 edit test, M00-M06 done
-Current objective: M07 fixed movement step done; persistent delayed tasks next
+Phase: P0 edit test, M00-M07 done
+Current objective: M07 complete; next inventory and item design
 Primary language: Java 21 (Eclipse Temurin 21.0.7)
 Build system: Gradle Wrapper 8.14.3
 Graphics: LWJGL 3.4.3, OpenGL 3.3
 Run: .\gradlew.bat run
 Headless checks: .\gradlew.bat verifyMath
 Minecraft Java Edition: not set
-Playable now: look, WASD, jump, break, place, hotbar, pause, snapshot save
+Playable now: look, WASD, jump, break, place, hotbar, pause, snapshot save, falling sand (slot 8)
 Not implemented: items, crafting, furnace, chests, lighting, chunk streaming, fluids
