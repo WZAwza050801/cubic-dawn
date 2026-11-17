@@ -47,6 +47,7 @@ public final class VerifyMath {
         verify.woodCrafting();
         verify.mining();
         ProductionChecks.run();
+        SurvivalChecks.run();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
