@@ -52,3 +52,9 @@
 5. `DISPLAY=:98 ./gradlew run -PworldFile=build/production-smoke.txt -Pframes=8` 验证恢复。应为 83 方块，箱内玻璃 2，背包木镐 1（耐久 31）、木板 1、原木 1，熔炉为空且余燃归零。
 
 截图写入 build/ui-smoke/production-*.png。运行结束后停止独立 Xorg。菜单暂停是预期规则，不要一直开着熔炉菜单等待烧制。两阶段脚本依次使用同一份世界，第二阶段不要重新运行夹具。
+
+## 生命与重生验收
+
+沿用独立 Linux :98 显示。`./gradlew classes` 后运行 `java --class-path build/classes/java/main tools/smoke/SurvivalFixture.java`（仅覆盖 build/survival-smoke.txt）。启动 `DISPLAY=:98 ./gradlew run -PworldFile=build/survival-smoke.txt`，看到 Hotbar 后在另一终端运行 `python3 tools/smoke/survival.py`。
+
+脚本验证低生命玩家坠落死亡、R 安全重生、背包/耐久/箱中玻璃不变，并正常退出。随后运行 `DISPLAY=:98 ./gradlew run -PworldFile=build/survival-smoke.txt -Pframes=8` 检查恢复。应有 1807 方块、生命 20、木镐耐久 7、泥土 5、箱内玻璃 3。截图位于 build/ui-smoke/survival-*.png。

@@ -15,6 +15,8 @@ import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.PlayerBody;
 import dev.cubicdawn.world.PlayerMotion;
 import dev.cubicdawn.world.PlayerState;
+import dev.cubicdawn.world.PlayerVitals;
+import dev.cubicdawn.world.SafeSpawn;
 import dev.cubicdawn.world.SnapshotIO;
 import dev.cubicdawn.world.VoxelRay;
 import org.lwjgl.Version;
@@ -118,6 +120,8 @@ public final class Main {
     private boolean cursorReady;
     private boolean focused = true;
     private boolean paused;
+    private final PlayerVitals vitals = new PlayerVitals();
+    private final ButtonEdge respawnEdge = new ButtonEdge();
     private boolean inventoryOpen;
     private int[] openContainerPosition;
     private int containerSelection;
@@ -304,6 +308,8 @@ public final class Main {
                 yaw = player.yaw();
                 pitch = player.pitch();
                 selectedSlot = player.slot();
+                velocityY = player.velocityY();
+                vitals.restore(player.health(),player.fallPeak());
                 System.out.println("Restored player at " + eyeX + " " + eyeY + " " + eyeZ);
             } else {
                 placeSpawn();
@@ -312,6 +318,10 @@ public final class Main {
                 pitch = angles[1];
                 System.out.println("Legacy save has no player; spawned on the island.");
             }
+            if(vitals.alive() && !SafeSpawn.clear(blocks,eyeX,eyeY,eyeZ)) {
+                notice=placeSpawn() ? "UNSAFE SAVED POSITION - SAFE RELOCATION" : "NO SAFE GROUND - R TO RETRY";
+            }
+            updateCursorMode();
             System.out.println("Loaded " + path + ": " + blocks.countSolid());
         } catch (RuntimeException | IOException exception) {
             saveAllowed = false;
@@ -333,7 +343,7 @@ public final class Main {
                 updateLook();
                 handleHotbar();
                 updateMove(frameSeconds);
-                handleEdit();
+                if (playing()) handleEdit();
             } else {
                 if (focused && inventoryOpen) handleInventory();
                 cursorReady = false;
@@ -398,11 +408,12 @@ public final class Main {
     }
 
     private boolean playing() {
-        return focused && !paused && !inventoryOpen;
+        return focused && !paused && !inventoryOpen && vitals.alive();
     }
 
     private void handleModeKeys() {
         if (!focused) {
+            respawnEdge.disarm();
             pauseEdge.disarm();
             quitEdge.disarm();
             saveEdge.disarm();
@@ -410,6 +421,12 @@ public final class Main {
             openContainerEdge.disarm();
             disarmInventoryButtons();
             return;
+        }
+        if (respawnEdge.poll(key(GLFW_KEY_R)) && !paused && !vitals.alive()) {
+            if(placeSpawn()) {
+                inventoryOpen=false; openContainerPosition=null; cursorReady=false;
+                disarmPlayButtons(); updateCursorMode(); notice="RESPAWNED - INVENTORY KEPT"; saveNow("respawn");
+            } else notice="NO SAFE GROUND - R TO RETRY";
         }
         if (openContainerEdge.poll(key(GLFW_KEY_F)) && playing()) {
             VoxelRay.Hit hit=aim();
@@ -419,7 +436,7 @@ public final class Main {
                 cursorReady=false; disarmPlayButtons(); disarmInventoryButtons(); updateCursorMode();
             } else notice="AIM AT A CHEST OR FURNACE TO OPEN";
         }
-        if (inventoryEdge.poll(key(GLFW_KEY_E)) && !paused) {
+        if (inventoryEdge.poll(key(GLFW_KEY_E)) && !paused && vitals.alive()) {
             inventoryOpen = !inventoryOpen;
             openContainerPosition=null;
             inventorySelection = selectedSlot;
@@ -511,9 +528,15 @@ public final class Main {
         final float inputX = wishX;
         final float inputZ = wishZ;
         simulation.advance(frameSeconds, true, jump, (seconds, jumpPressed) -> {
+            if(!vitals.alive()) return;
             PlayerMotion.step(pose, seconds, inputX, inputZ, jumpPressed, blocks::isSolidAt);
             blocks.tick((x, y, z) -> PlayerBody.overlapsBlock(pose.x, pose.y, pose.z, x, y, z));
             eyeX = pose.x; eyeY = pose.y; eyeZ = pose.z; velocityY = pose.velocityY;
+            vitals.tick(pose.y,PlayerBody.onGround(pose.x,pose.y,pose.z,blocks::isSolidAt));
+            if(!vitals.alive()) {
+                mining.reset(); miningArmed=false; notice="YOU DIED - R TO RESPAWN";
+                updateCursorMode(); saveNow("death"); return;
+            }
             boolean held = mouse(GLFW_MOUSE_BUTTON_LEFT);
             if (!held) miningArmed = true;
             VoxelRay.Hit hit = aim();
@@ -626,7 +649,7 @@ public final class Main {
             return;
         }
         try {
-            PlayerState player = new PlayerState(eyeX, eyeY, eyeZ, yaw, pitch, selectedSlot);
+            PlayerState player = new PlayerState(eyeX, eyeY, eyeZ, yaw, pitch, selectedSlot,vitals.health(),velocityY,vitals.peak());
             SnapshotIO.SaveResult result = SnapshotIO.save(worldPath(), blocks, player, inventory);
             if (blocks.dirty() || result.coveredLaterEdits()) {
                 System.out.println("Saved " + reason + " revision " + result.revision() + "; newer edits remain.");
@@ -638,10 +661,11 @@ public final class Main {
         }
     }
 
-    private void placeSpawn() {
-        eyeX = 2f;
-        eyeZ = 3f;
-        eyeY = blocks.highestSolid(2, 3) + 1.4f + 0.25f;
+    private boolean placeSpawn() {
+        var point=SafeSpawn.find(blocks);
+        if(point.isEmpty()) { vitals.restore(0,Math.max(vitals.peak(),eyeY)); return false; }
+        eyeX=point.get().x();eyeY=point.get().y();eyeZ=point.get().z();velocityY=0;
+        vitals.respawn(eyeY);return true;
     }
 
     private void drawSolidBlocks() {
@@ -705,6 +729,7 @@ public final class Main {
         Inventory.Stack held = inventory.slot(selectedSlot);
         if (ItemIds.tool(held.id())) drawText("USES: " + held.durability() + "/32", left, bottom + size + 25, 1, WHITE);
         drawText(notice, 12, height - 38, 1, WHITE);
+        drawText("HEALTH "+vitals.health()+"/20",12,height-54,1,SELECT_COLOR);
         if (inventoryOpen) {
             if (openContainerPosition!=null) drawContainer(width,height);
             else drawInventory(width,height);
@@ -716,6 +741,11 @@ public final class Main {
             drawQuad(centerX + 2, centerY - 1, 6, 2, CROSSHAIR_COLOR);
             drawQuad(centerX - 1, centerY + 2, 2, 6, CROSSHAIR_COLOR);
             drawQuad(centerX - 1, centerY - 8, 2, 6, CROSSHAIR_COLOR);
+        }
+        if(!vitals.alive()) {
+            drawQuad(width/2-230,height/2-40,460,90,PAUSE_COLOR);
+            drawText("YOU DIED",width/2-96,height/2+15,3,WHITE);
+            drawText("R: SAFE RESPAWN - INVENTORY KEPT",width/2-180,height/2-15,2,WHITE);
         }
         if (paused) {
             drawQuad(0, height - 24, width, 24, PAUSE_COLOR);

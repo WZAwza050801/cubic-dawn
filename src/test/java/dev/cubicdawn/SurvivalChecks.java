@@ -6,7 +6,7 @@ public final class SurvivalChecks {
         if(!ok) throw new IllegalStateException("FAIL "+label);
         System.out.println("PASS "+label);
     }
-    public static void run() {
+    public static void run() throws Exception {
         BlockWorld world=BlockWorld.generateForestIsland(); var first=SafeSpawn.find(world).orElseThrow();
         check("SPAWN_CLEAR",SafeSpawn.clear(world,first.x(),first.y(),first.z()));
         check("SPAWN_DETERMINISTIC",SafeSpawn.find(world).orElseThrow().equals(first));
@@ -43,6 +43,28 @@ public final class SurvivalChecks {
         boolean rejected=false;
         try {new PlayerState(0,2,0,0,0,0,21,0,2);}catch(IllegalArgumentException expected){rejected=true;}
         check("VITALS_INVALID",rejected);
+        String text=SnapshotIO.encode(world,falling,world.revision(),Inventory.starter());
+        var legacyLines=new java.util.ArrayList<String>();
+        for(String line:text.split("\n")) {
+            if(line.startsWith("checksum ")) continue;
+            if(line.startsWith("cubic-dawn-blocks")) line="cubic-dawn-blocks 8";
+            if(line.startsWith("player ")) line=String.join(" ",java.util.Arrays.copyOf(line.split(" "),7));
+            legacyLines.add(line);
+        }
+        String canonical=String.join("\n",legacyLines)+"\n";
+        String hash=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        int newline=canonical.indexOf('\n');
+        var legacy=SnapshotIO.parse(canonical.substring(0,newline+1)+"checksum sha256 "+hash+"\n"+canonical.substring(newline+1));
+        check("V8_HEALTH_MIGRATION",legacy.player().health()==20 && legacy.player().velocityY()==0
+                && legacy.player().fallPeak()==legacy.player().y());
+        boolean checksum=false;
+        try{SnapshotIO.parse(text.replace(" 14 -8.0 10.0"," 13 -8.0 10.0"));}
+        catch(IllegalStateException expected){checksum=expected.getMessage().contains("checksum");}
+        check("VITALS_CHECKSUM",checksum);
+        var dead=new PlayerState(2,2,3,0,0,0,0,0,2);
+        check("DEATH_SAVE",SnapshotIO.parse(SnapshotIO.encode(world,dead,world.revision(),Inventory.starter())).player().health()==0);
+
 
     }
 }
