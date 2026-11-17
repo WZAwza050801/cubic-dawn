@@ -93,7 +93,9 @@ public final class Inventory {
         PICKAXE(ItemIds.WOOD_PICKAXE, 1, true, new Ingredient(BlockIds.PLANKS, 3), new Ingredient(ItemIds.STICK, 2)),
         AXE(ItemIds.WOOD_AXE, 1, true, new Ingredient(BlockIds.PLANKS, 3), new Ingredient(ItemIds.STICK, 2)),
         SHOVEL(ItemIds.WOOD_SHOVEL, 1, true, new Ingredient(BlockIds.PLANKS, 1), new Ingredient(ItemIds.STICK, 2)),
-        SAPLING_FROM_LEAVES(ItemIds.SAPLING, 1, false, new Ingredient(BlockIds.LEAVES, 4));
+        SAPLING_FROM_LEAVES(ItemIds.SAPLING, 1, false, new Ingredient(BlockIds.LEAVES, 4)),
+        FURNACE(BlockIds.FURNACE, 1, true, new Ingredient(BlockIds.STONE, 8)),
+        CHEST(BlockIds.CHEST, 1, true, new Ingredient(BlockIds.PLANKS, 8));
         public final int output, amount;
         public final boolean needsBench;
         public final List<Ingredient> ingredients;

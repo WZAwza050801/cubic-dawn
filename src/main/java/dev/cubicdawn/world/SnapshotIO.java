@@ -28,6 +28,8 @@ public final class SnapshotIO {
 
     public static final String HEADER_V7 = "cubic-dawn-blocks 7";
 
+    public static final String HEADER_V8 = "cubic-dawn-blocks 8";
+
     private SnapshotIO() {
     }
 
@@ -41,6 +43,7 @@ public final class SnapshotIO {
             List<Inventory.Stack> inventory,
             long simulationTick,
             List<BlockTicks.Task> tasks,
+            List<BlockContainer.State> containers,
             boolean restoredFromBackup
     ) {
     }
@@ -50,7 +53,14 @@ public final class SnapshotIO {
 
     public static String encode(BlockWorld world, PlayerState player, long revision, Inventory inventory) {
         List<String> lines = new ArrayList<>();
-        lines.add(HEADER_V7);
+        lines.add(HEADER_V8);
+        for (BlockContainer.State state : world.containerStates()) {
+            StringBuilder line = new StringBuilder("box " + state.x() + " " + state.y() + " " + state.z()
+                    + " " + state.type() + " " + state.burn() + " " + state.progress());
+            for (Inventory.Stack stack : state.items()) line.append(" ").append(stack.id()).append(":")
+                    .append(stack.count()).append(":").append(stack.durability());
+            lines.add(line.toString());
+        }
         for (int slot = 0; slot < Inventory.SLOTS; slot++) {
             Inventory.Stack stack = inventory.slot(slot);
             lines.add("item " + slot + " " + stack.id() + " " + stack.count() + " " + stack.durability());
@@ -85,7 +95,7 @@ public final class SnapshotIO {
         if (HEADER_V3.equals(header)) {
             return parseBody(3, lines.subList(1, lines.size()), false);
         }
-        if (!HEADER_V4.equals(header) && !HEADER_V5.equals(header) && !HEADER_V6.equals(header) && !HEADER_V7.equals(header)) {
+        if (!HEADER_V4.equals(header) && !HEADER_V5.equals(header) && !HEADER_V6.equals(header) && !HEADER_V7.equals(header) && !HEADER_V8.equals(header)) {
             throw new IllegalStateException("Unrecognized save header: " + header);
         }
         String checksum = null;
@@ -111,7 +121,7 @@ public final class SnapshotIO {
         if (!checksum.equals(actual)) {
             throw new IllegalStateException("Save checksum does not match the file contents.");
         }
-        return parseBody(HEADER_V7.equals(header) ? 7 : HEADER_V6.equals(header) ? 6 : HEADER_V5.equals(header) ? 5 : 4, body, false);
+        return parseBody(HEADER_V8.equals(header) ? 8 : HEADER_V7.equals(header) ? 7 : HEADER_V6.equals(header) ? 6 : HEADER_V5.equals(header) ? 5 : 4, body, false);
     }
 
     public static SaveResult save(Path path, BlockWorld world, PlayerState player, Inventory inventory) throws IOException {
@@ -140,6 +150,7 @@ public final class SnapshotIO {
                     snapshot.inventory(),
                     snapshot.simulationTick(),
                     snapshot.tasks(),
+                    snapshot.containers(),
                     true
             );
         }
@@ -170,6 +181,7 @@ public final class SnapshotIO {
     }
 
     private static Snapshot parseBody(int version, List<String> lines, boolean fromBackup) {
+        List<BlockContainer.State> containers = new ArrayList<>();
         Inventory.Stack[] items = new Inventory.Stack[Inventory.SLOTS];
         Long tick = null;
         List<BlockTicks.Task> tasks = new ArrayList<>();
@@ -180,6 +192,19 @@ public final class SnapshotIO {
         List<Integer> unknownIds = new ArrayList<>();
         HashSetPositions seen = new HashSetPositions();
         for (String line : lines) {
+            if (version >= 8 && line.startsWith("box ")) {
+                String[] fields=line.split(" ");
+                if (fields.length < 10) throw new IllegalStateException("Bad container line");
+                List<Inventory.Stack> contents=new ArrayList<>();
+                for (int i=7;i<fields.length;i++) {
+                    String[] stack=fields[i].split(":");
+                    if (stack.length!=3) throw new IllegalStateException("Bad stored stack");
+                    contents.add(new Inventory.Stack(Integer.parseInt(stack[0]),Integer.parseInt(stack[1]),Integer.parseInt(stack[2])));
+                }
+                containers.add(new BlockContainer.State(Integer.parseInt(fields[1]),Integer.parseInt(fields[2]),Integer.parseInt(fields[3]),
+                        Integer.parseInt(fields[4]),Integer.parseInt(fields[5]),Integer.parseInt(fields[6]),contents));
+                continue;
+            }
             if (version >= 6 && line.startsWith("item ")) {
                 String[] fields = line.split(" ");
                 if (fields.length != (version >= 7 ? 5 : 4)) throw new IllegalStateException("Bad inventory line");
@@ -255,8 +280,17 @@ public final class SnapshotIO {
             for (Inventory.Stack stack : items) if (stack == null) throw new IllegalStateException("Missing inventory slot");
             inventory = List.of(items);
         }
+        java.util.Map<String,Integer> expected=new java.util.HashMap<>();
+        for (int[] block : blocks) if (block[3]==BlockIds.CHEST || block[3]==BlockIds.FURNACE) {
+            expected.put(block[0]+":"+block[1]+":"+block[2],block[3]);
+        }
+        for (BlockContainer.State container : containers) {
+            Integer type=expected.remove(container.x()+":"+container.y()+":"+container.z());
+            if (type==null || type!=container.type()) throw new IllegalStateException("Duplicate or orphaned container");
+        }
+        if (version>=8 && !expected.isEmpty()) throw new IllegalStateException("Missing container state");
         return new Snapshot(version, seed, revision, player, blocks, unknownIds, inventory,
-                validated.tick(), validated.tasks(), fromBackup);
+                validated.tick(), validated.tasks(), List.copyOf(containers), fromBackup);
     }
 
     private static PlayerState parsePlayer(String text) {
