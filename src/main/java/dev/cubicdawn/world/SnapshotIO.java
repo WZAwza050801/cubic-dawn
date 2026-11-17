@@ -30,6 +30,8 @@ public final class SnapshotIO {
 
     public static final String HEADER_V8 = "cubic-dawn-blocks 8";
 
+    public static final String HEADER_V9 = "cubic-dawn-blocks 9";
+
     private SnapshotIO() {
     }
 
@@ -53,7 +55,7 @@ public final class SnapshotIO {
 
     public static String encode(BlockWorld world, PlayerState player, long revision, Inventory inventory) {
         List<String> lines = new ArrayList<>();
-        lines.add(HEADER_V8);
+        lines.add(HEADER_V9);
         for (BlockContainer.State state : world.containerStates()) {
             StringBuilder line = new StringBuilder("box " + state.x() + " " + state.y() + " " + state.z()
                     + " " + state.type() + " " + state.burn() + " " + state.progress());
@@ -78,7 +80,7 @@ public final class SnapshotIO {
                     + Float.toString(player.z()) + " "
                     + Float.toString(player.yaw()) + " "
                     + Float.toString(player.pitch()) + " "
-                    + player.slot());
+                    + player.slot() + " " + player.health() + " " + player.velocityY() + " " + player.fallPeak());
         }
         world.forEachSolid((x, y, z, id) -> lines.add(x + " " + y + " " + z + " " + id));
         String canonical = join(lines);
@@ -95,7 +97,7 @@ public final class SnapshotIO {
         if (HEADER_V3.equals(header)) {
             return parseBody(3, lines.subList(1, lines.size()), false);
         }
-        if (!HEADER_V4.equals(header) && !HEADER_V5.equals(header) && !HEADER_V6.equals(header) && !HEADER_V7.equals(header) && !HEADER_V8.equals(header)) {
+        if (!HEADER_V4.equals(header) && !HEADER_V5.equals(header) && !HEADER_V6.equals(header) && !HEADER_V7.equals(header) && !HEADER_V8.equals(header) && !HEADER_V9.equals(header)) {
             throw new IllegalStateException("Unrecognized save header: " + header);
         }
         String checksum = null;
@@ -121,7 +123,7 @@ public final class SnapshotIO {
         if (!checksum.equals(actual)) {
             throw new IllegalStateException("Save checksum does not match the file contents.");
         }
-        return parseBody(HEADER_V8.equals(header) ? 8 : HEADER_V7.equals(header) ? 7 : HEADER_V6.equals(header) ? 6 : HEADER_V5.equals(header) ? 5 : 4, body, false);
+        return parseBody(HEADER_V9.equals(header) ? 9 : HEADER_V8.equals(header) ? 8 : HEADER_V7.equals(header) ? 7 : HEADER_V6.equals(header) ? 6 : HEADER_V5.equals(header) ? 5 : 4, body, false);
     }
 
     public static SaveResult save(Path path, BlockWorld world, PlayerState player, Inventory inventory) throws IOException {
@@ -237,7 +239,7 @@ public final class SnapshotIO {
                 continue;
             }
             if (line.startsWith("player ")) {
-                player = parsePlayer(line.substring(7).trim());
+                player = parsePlayer(line.substring(7).trim(),version);
                 continue;
             }
             String[] parts = line.split(" ");
@@ -293,9 +295,9 @@ public final class SnapshotIO {
                 validated.tick(), validated.tasks(), List.copyOf(containers), fromBackup);
     }
 
-    private static PlayerState parsePlayer(String text) {
+    private static PlayerState parsePlayer(String text,int version) {
         String[] parts = text.split(" ");
-        if (parts.length != 6) {
+        if (parts.length != (version>=9 ? 9 : 6)) {
             throw new IllegalStateException("Bad player line: " + text);
         }
         float x = parseFinite(parts[0]);
@@ -307,7 +309,8 @@ public final class SnapshotIO {
         if (slot < 0 || slot >= EditHotbar.SLOTS) {
             throw new IllegalStateException("Player slot is outside the hotbar: " + slot);
         }
-        return new PlayerState(x, y, z, yaw, pitch, slot);
+        return version>=9 ? new PlayerState(x,y,z,yaw,pitch,slot,Integer.parseInt(parts[6]),parseFinite(parts[7]),parseFinite(parts[8]))
+                : new PlayerState(x, y, z, yaw, pitch, slot);
     }
 
     private static float parseFinite(String text) {

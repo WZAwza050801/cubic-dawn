@@ -22,7 +22,7 @@ public final class SafeSpawn {
         return Optional.empty();
     }
     public static boolean clear(BlockWorld world,float x,float y,float z) {
-        if(!Float.isFinite(x)||!Float.isFinite(y)||!Float.isFinite(z) || y < -20) return false;
+        if(!Float.isFinite(x)||!Float.isFinite(y)||!Float.isFinite(z) || y < -20 || y>16 || x < -16 || x>16 || z < -16 || z>16) return false;
         return !PlayerBody.overlapsSolid(x,y,z,(bx,by,bz)-> {
             CellView cell=world.query(bx,by,bz);
             return cell.kind()!=CellKind.KNOWN || cell.id()!=BlockIds.AIR;
