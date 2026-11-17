@@ -836,12 +836,22 @@ public final class VerifyMath {
         var unchanged = incomplete.snapshot();
         check("TOOL_MISSING_INPUT", !incomplete.craft(Inventory.Recipe.AXE, true)
                 && unchanged.equals(incomplete.snapshot()), "partial recipe consumed planks");
+        Inventory full = new Inventory();
+        full.add(BlockIds.PLANKS, 64); full.add(ItemIds.STICK, 64); full.add(BlockIds.DIRT, 25 * 64);
+        var packed = full.snapshot();
+        check("TOOL_FULL_ROLLBACK", !full.craft(Inventory.Recipe.PICKAXE, true)
+                && packed.equals(full.snapshot()), "multi-input failure partially consumed materials");
         BlockWorld world = BlockWorld.empty();
         world.placeBlock(1, 0, 0, 0, BlockIds.WORKBENCH, 0, null);
         check("BENCH_DISTANCE", world.nearWorkbench(3, 0, 0) && !world.nearWorkbench(3.01f, 0, 0), "bench radius");
         world.setSimulationLoaded(0, 0, 0, false);
         check("BENCH_UNLOADED", !world.nearWorkbench(0, 0, 0), "unloaded bench granted access");
         world.setSimulationLoaded(0, 0, 0, true);
+        int toolSlot = 0;
+        for (int i = 0; i < Inventory.SLOTS; i++) if (ItemIds.tool(bag.slot(i).id())) { toolSlot = i; break; }
+        int toolCount = bag.count(ItemIds.WOOD_PICKAXE);
+        check("TOOL_NOT_BLOCK", !PlayerActions.placeBlock(world, bag, toolSlot, 99, 1, 0, 0, 0, null).accepted()
+                && bag.count(ItemIds.WOOD_PICKAXE) == toolCount, "tool was placed or consumed");
         Path file = Files.createTempDirectory("cubic-dawn-tools").resolve("world.txt");
         SnapshotIO.save(file, world, null, bag);
         check("TOOL_SAVE", SnapshotIO.load(file).inventory().equals(bag.snapshot()), "tool save");
@@ -854,6 +864,23 @@ public final class VerifyMath {
         seeds.add(ItemIds.SAPLING, 1);
         check("SAPLING_FAIL", !PlayerActions.placeBlock(world, seeds, 0, 4, 8, 1, 0, 0, null).accepted()
                 && seeds.count(ItemIds.SAPLING) == 1, "failed planting consumed seed");
+        BlockWorld forest = BlockWorld.empty(); forest.placeBlock(1,0,0,0,BlockIds.DIRT,0,null);
+        Inventory renewable = new Inventory(); renewable.add(BlockIds.DIRT,4);
+        renewable.craft(Inventory.Recipe.SAPLING);
+        PlayerActions.placeBlock(forest,renewable,0,2,0,1,0,0,null);
+        java.util.List<int[]> harvested = new java.util.ArrayList<>();
+        forest.forEachSolid((x,y,z,id) -> { if(id==BlockIds.LOG || id==BlockIds.LEAVES) harvested.add(new int[]{x,y,z}); });
+        long command = 3;
+        for (int[] cell : harvested) PlayerActions.breakBlock(forest,renewable,command++,cell[0],cell[1],cell[2],
+                forest.query(cell[0],cell[1],cell[2]).revision());
+        boolean regrown = renewable.craft(Inventory.Recipe.SAPLING_FROM_LEAVES);
+        int seedSlot = 0;
+        for (int i=0;i<Inventory.SLOTS;i++) if(renewable.slot(i).id()==ItemIds.SAPLING) seedSlot=i;
+        regrown &= PlayerActions.placeBlock(forest,renewable,seedSlot,command,0,1,0,
+                forest.query(0,1,0).revision(),null).accepted();
+        check("TREE_RENEWABLE_LOOP", regrown && renewable.count(BlockIds.LOG)==3
+                && renewable.count(BlockIds.LEAVES)==14 && forest.countSolid()==22, "harvest and replant loop");
+
     }
 
     private void mining() {

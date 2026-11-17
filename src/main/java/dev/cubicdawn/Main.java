@@ -140,7 +140,6 @@ public final class Main {
     private long nextCommand = 1L;
     private String lastAimText = "";
     private BlockWorld blocks;
-    private final ButtonEdge leftEdge = new ButtonEdge();
     private final ButtonEdge rightEdge = new ButtonEdge();
     private final FixedStep simulation = new FixedStep();
     private final ButtonEdge jumpEdge = new ButtonEdge();
@@ -434,7 +433,6 @@ public final class Main {
         miningArmed = false;
         simulation.reset();
         lastFrameTime = glfwGetTime();
-        leftEdge.disarm();
         rightEdge.disarm();
         jumpEdge.disarm();
     }
@@ -726,7 +724,7 @@ public final class Main {
                 int top = (fb[1] + 300) / 2;
                 for (int index = 0; index < Inventory.SLOTS; index++) {
                     int sx = left + 20 + index % 9 * 55;
-                    int sy = top - 90 - index / 9 * 50;
+                    int sy = top - 102 - index / 9 * 50;
                     if (x >= sx && x < sx + 44 && y >= sy && y < sy + 44) inventorySelection = index;
                 }
             }
@@ -760,7 +758,7 @@ public final class Main {
         drawText("UP/DOWN: RECIPE  ENTER: CRAFT  C/V: QUICK", left + 20, top - 55, 1, WHITE);
         for (int index = 0; index < Inventory.SLOTS; index++) {
             int x = left + 20 + index % 9 * 55;
-            int y = top - 90 - index / 9 * 50;
+            int y = top - 102 - index / 9 * 50;
             if (index == inventorySelection) drawQuad(x - 2, y - 2, 48, 48, SELECT_COLOR);
             Inventory.Stack stack = inventory.slot(index);
             drawQuad(x, y, 44, 44, new float[] {0.18f, 0.20f, 0.24f});
