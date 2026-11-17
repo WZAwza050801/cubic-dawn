@@ -1,4 +1,5 @@
 Project: Cubic Dawn / 方块黎明
+GitHub: https://github.com/WZAwza050801/cubic-dawn
 Phase: P0 edit test, M00-M06 done
 Current objective: fixed simulation step (M07)
 Primary language: Java 21 (Eclipse Temurin 21.0.7)
