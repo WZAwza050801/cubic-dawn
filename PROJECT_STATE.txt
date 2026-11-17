@@ -1,12 +1,12 @@
 Project: Cubic Dawn / 方块黎明
 GitHub: https://github.com/WZAwza050801/cubic-dawn
-Phase: P0 sandbox, M00-M16 done
-Current objective: durability, furnace and chests verified; next drops, health and richer resources
+Phase: P0 sandbox, M00-M19 done
+Current objective: health, fall damage and safe respawn verified; next dropped items and richer resources
 Primary language: Java 21 (Eclipse Temurin 21.0.7)
 Build system: Gradle Wrapper 8.14.3
 Graphics: LWJGL 3.4.3, OpenGL 3.3
 Run: .\gradlew.bat run
 Headless checks: .\gradlew.bat verifyMath
 Minecraft Java Edition: not set
-Playable now: trees, planting, hold-to-mine, tool speedups, finite placement, 27-slot inventory (E), recipes (Up/Down/Enter), workbench, falling sand, durability, furnace, chest (F), snapshot v8
-Not implemented: dropped item entities, health/hunger, higher-tier tools, transparency/textures/lighting, chunk streaming, fluids
+Playable now: trees, planting, hold-to-mine, tool speedups, finite placement, 27-slot inventory (E), recipes (Up/Down/Enter), workbench, falling sand, durability, furnace, chest (F), health/fall damage, safe respawn (R), snapshot v9
+Not implemented: dropped item entities, hunger/food/enemies, higher-tier tools, transparency/textures/lighting, chunk streaming, fluids
