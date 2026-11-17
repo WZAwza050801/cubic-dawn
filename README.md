@@ -1,5 +1,7 @@
 # Cubic Dawn / 方块黎明
 
+仓库：[github.com/WZAwza050801/cubic-dawn](https://github.com/WZAwza050801/cubic-dawn)
+
 做一个三维沙盒，世界的底座由方块与像素构成。
 
 从最小可运行程序开始，由真实需求、Bug 和性能问题推动架构演化。

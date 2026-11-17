@@ -1,4 +1,5 @@
 Project: Cubic Dawn / 方块黎明
+GitHub: https://github.com/WZAwza050801/cubic-dawn
 Phase: P0 edit test, M00-M07 done
 Current objective: M07 complete; next inventory and item design
 Primary language: Java 21 (Eclipse Temurin 21.0.7)
