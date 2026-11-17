@@ -40,3 +40,15 @@
    最终背包计数应为原木 6、泥土 4、木板 3、木棍 2、木镐 1、工作台 1、石 1。完成后用启动终端的 Ctrl+C 停止独立 Xorg。
 
 云端验证额外使用了环境现有网络代理及系统 CA 信任库；这些设置未写入仓库。Windows/macOS 仍使用普通启动命令人工验收，本脚本仅支持上述 Linux 环境。
+
+## 熔炉与箱子验收
+
+沿用上述 Linux 依赖和独立 `:98` 显示。从仓库根目录运行，夹具仅覆盖 build/production-smoke.txt。
+
+1. `./gradlew classes`，然后 `java --class-path build/classes/java/main tools/smoke/ProductionFixture.java`。
+2. 启动 `DISPLAY=:98 ./gradlew run -PworldFile=build/production-smoke.txt`，等待打印 `Hotbar: sand`。
+3. 另一终端执行 `python3 tools/smoke/production_first.py`。脚本会打开熔炉、加入两个沙和一个木板，确认菜单暂停，运行部分加工后保存并正常退出。
+4. 再启动同一游戏命令，等待 `Hotbar:`；执行 `python3 tools/smoke/production_second.py`。会继续烧完两个玻璃，取出后横移到箱子，存入耐久 31 的木镐，确认非空箱子不能拆除，再取回工具、存入两个玻璃并退出。
+5. `DISPLAY=:98 ./gradlew run -PworldFile=build/production-smoke.txt -Pframes=8` 验证恢复。应为 83 方块，箱内玻璃 2，背包木镐 1（耐久 31）、木板 1、原木 1，熔炉为空且余燃归零。
+
+截图写入 build/ui-smoke/production-*.png。运行结束后停止独立 Xorg。菜单暂停是预期规则，不要一直开着熔炉菜单等待烧制。两阶段脚本依次使用同一份世界，第二阶段不要重新运行夹具。

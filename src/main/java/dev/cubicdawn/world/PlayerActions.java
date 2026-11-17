@@ -12,6 +12,12 @@ public final class PlayerActions {
         if (result.accepted()) inventory.add(cell.id(), 1);
         return result;
     }
+    public static EditReceipt mineBlock(BlockWorld world, Inventory inventory, int toolSlot, long command,
+                                        int x, int y, int z, int expectedRevision) {
+        EditReceipt result = breakBlock(world, inventory, command, x, y, z, expectedRevision);
+        if (result.accepted()) inventory.damageTool(toolSlot);
+        return result;
+    }
     public static EditReceipt placeBlock(BlockWorld world, Inventory inventory, int slot, long command,
                                          int x, int y, int z, int expectedRevision, PlayerBody.SolidAt body) {
         Inventory.Stack stack = inventory.slot(slot);

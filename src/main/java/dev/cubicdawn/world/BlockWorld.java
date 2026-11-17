@@ -20,6 +20,8 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
     private final int[] revisions = new int[SPAN * SPAN * SPAN];
     private final boolean[] unloaded = new boolean[SPAN * SPAN * SPAN];
     private final HashSet<Long> acceptedCommands = new HashSet<>();
+    private record Position(int x,int y,int z) { }
+    private final java.util.Map<Position,BlockContainer> containers = new java.util.HashMap<>();
     private final BlockTicks blockTicks = new BlockTicks();
     private long revision;
     private boolean dirty;
@@ -183,6 +185,9 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         if (view.id() == BlockIds.AIR) {
             return EditReceipt.reject("not_solid");
         }
+        BlockContainer container=containers.get(new Position(x,y,z));
+        if (container!=null && !container.empty()) return EditReceipt.reject("container_not_empty");
+        containers.remove(new Position(x,y,z));
         blockTicks.cancel(x, y, z);
         put(x, y, z, BlockIds.AIR, view.revision() + 1);
         scheduleSand(x, y + 1, z);
@@ -228,6 +233,7 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         }
         blockTicks.cancel(x, y, z);
         put(x, y, z, id, view.revision() + 1);
+        if (id==BlockIds.CHEST || id==BlockIds.FURNACE) containers.put(new Position(x,y,z),new BlockContainer(id));
         scheduleSand(x, y, z);
         scheduleSand(x, y + 1, z);
         acceptedCommands.add(commandId);
@@ -249,8 +255,15 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
             unloaded[i] = false;
         }
         mutations++;
+        containers.clear();
         for (int[] block : snapshot.blocks()) {
             put(block[0], block[1], block[2], block[3], 1);
+            if (block[3]==BlockIds.CHEST || block[3]==BlockIds.FURNACE) {
+                containers.put(new Position(block[0],block[1],block[2]),new BlockContainer(block[3]));
+            }
+        }
+        for (BlockContainer.State state : snapshot.containers()) {
+            containers.put(new Position(state.x(),state.y(),state.z()),BlockContainer.restore(state));
         }
         revision = snapshot.revision() == null ? 1L : snapshot.revision();
         dirty = false;
@@ -269,6 +282,17 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         return false;
     }
 
+    public BlockContainer containerAt(int x,int y,int z) {
+        CellView cell=query(x,y,z);
+        return cell.kind()==CellKind.KNOWN ? containers.get(new Position(x,y,z)) : null;
+    }
+    public java.util.List<BlockContainer.State> containerStates() {
+        return containers.entrySet().stream().map(e -> e.getValue().state(e.getKey().x(),e.getKey().y(),e.getKey().z()))
+                .sorted(java.util.Comparator.comparingInt(BlockContainer.State::x).thenComparingInt(BlockContainer.State::y)
+                        .thenComparingInt(BlockContainer.State::z)).toList();
+    }
+    public void containerChanged() { revision++; dirty=true; }
+
     public BlockTicks blockTicks() { return blockTicks; }
 
     private void scheduleSand(int x, int y, int z) {
@@ -280,6 +304,10 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
 
     /** One atomic cell move. Unknown space and the player's body block falling. */
     public void tick(PlayerBody.SolidAt body) {
+        for (var entry : containers.entrySet()) {
+            Position p=entry.getKey();
+            if (query(p.x(),p.y(),p.z()).kind()==CellKind.KNOWN && entry.getValue().tick()) containerChanged();
+        }
         for (BlockTicks.Task task : blockTicks.advance()) {
             int x = task.x(), y = task.y(), z = task.z();
             CellView source = query(x, y, z);

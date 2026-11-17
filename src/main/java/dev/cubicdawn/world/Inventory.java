@@ -6,10 +6,14 @@ import java.util.List;
 public final class Inventory {
     public static final int SLOTS = 27;
     public static final int STACK_LIMIT = 64;
-    public record Stack(int id, int count) {
+    public record Stack(int id, int count, int durability) {
+        public Stack(int id, int count) { this(id, count, ItemIds.durability(id)); }
         public Stack {
             if (id < 0 || id > 65535 || count < 0 || count > ItemIds.stackLimit(id)
                     || (id == 0) != (count == 0)) throw new IllegalArgumentException("Invalid item stack");
+            if (ItemIds.tool(id) ? durability < 1 || durability > ItemIds.durability(id) : durability != 0) {
+                throw new IllegalArgumentException("Invalid item durability");
+            }
         }
     }
     private final Stack[] slots = new Stack[SLOTS];
@@ -38,18 +42,23 @@ public final class Inventory {
         return count;
     }
     public boolean canAdd(int id, int count) { return copy().add(id, count); }
-    public boolean add(int id, int count) {
+    public boolean add(int id, int count) { return insert(id, count, ItemIds.durability(id)); }
+    public boolean addStack(Stack stack) {
+        return stack.count() == 0 || insert(stack.id(), stack.count(), stack.durability());
+    }
+    private boolean insert(int id, int count, int durability) {
         if (id <= 0 || id > 65535 || count <= 0) throw new IllegalArgumentException("Invalid items");
         int capacity = 0;
-        for (Stack stack : slots) if (stack.id() == id || stack.id() == 0) capacity += ItemIds.stackLimit(id) - stack.count();
+        for (Stack stack : slots) if ((stack.id() == id && stack.durability() == durability) || stack.id() == 0) capacity += ItemIds.stackLimit(id) - stack.count();
         if (capacity < count) return false;
         int remaining = count;
         // Fill existing stacks before occupying empty slots.
         for (int pass = 0; pass < 2; pass++) for (int i = 0; i < SLOTS && remaining > 0; i++) {
             Stack stack = slots[i];
-            if (pass == 0 ? stack.id() != id : stack.id() != 0) continue;
+            if (pass == 0 ? stack.id() != id || stack.durability() != durability : stack.id() != 0) continue;
             int amount = Math.min(ItemIds.stackLimit(id) - stack.count(), remaining);
-            slots[i] = new Stack(id, stack.count() + amount);
+            if (amount == 0) continue;
+            slots[i] = new Stack(id, stack.count() + amount, durability);
             remaining -= amount;
         }
         return true;
@@ -57,7 +66,17 @@ public final class Inventory {
     public boolean remove(int slot, int count) {
         Stack stack = slots[slot];
         if (count <= 0 || stack.count() < count) return false;
-        slots[slot] = stack.count() == count ? new Stack(0, 0) : new Stack(stack.id(), stack.count() - count);
+        slots[slot] = stack.count() == count ? new Stack(0, 0) : new Stack(stack.id(), stack.count() - count, stack.durability());
+        return true;
+    }
+    public void damageTool(int slot) {
+        Stack stack = slots[slot];
+        if (!ItemIds.tool(stack.id())) return;
+        slots[slot] = stack.durability() == 1 ? new Stack(0, 0) : new Stack(stack.id(), 1, stack.durability() - 1);
+    }
+    public boolean transferTo(Inventory target, int slot) {
+        if (target == this || slots[slot].count() == 0 || !target.addStack(slots[slot])) return false;
+        slots[slot] = new Stack(0, 0);
         return true;
     }
     public void swap(int first, int second) {
@@ -74,7 +93,9 @@ public final class Inventory {
         PICKAXE(ItemIds.WOOD_PICKAXE, 1, true, new Ingredient(BlockIds.PLANKS, 3), new Ingredient(ItemIds.STICK, 2)),
         AXE(ItemIds.WOOD_AXE, 1, true, new Ingredient(BlockIds.PLANKS, 3), new Ingredient(ItemIds.STICK, 2)),
         SHOVEL(ItemIds.WOOD_SHOVEL, 1, true, new Ingredient(BlockIds.PLANKS, 1), new Ingredient(ItemIds.STICK, 2)),
-        SAPLING_FROM_LEAVES(ItemIds.SAPLING, 1, false, new Ingredient(BlockIds.LEAVES, 4));
+        SAPLING_FROM_LEAVES(ItemIds.SAPLING, 1, false, new Ingredient(BlockIds.LEAVES, 4)),
+        FURNACE(BlockIds.FURNACE, 1, true, new Ingredient(BlockIds.STONE, 8)),
+        CHEST(BlockIds.CHEST, 1, true, new Ingredient(BlockIds.PLANKS, 8));
         public final int output, amount;
         public final boolean needsBench;
         public final List<Ingredient> ingredients;

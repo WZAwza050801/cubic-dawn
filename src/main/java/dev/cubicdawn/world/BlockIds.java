@@ -18,6 +18,9 @@ public final class BlockIds {
     public static final int LEAVES = 12;
     public static final int PLANKS = 13;
     public static final int WORKBENCH = 14;
+    public static final int FURNACE = 15;
+    public static final int CHEST = 16;
+    public static final int GLASS = 17;
     /** 只给支撑测试用，不放进快捷栏。 */
     public static final int SUPPORT_PROBE = 100;
 
@@ -29,7 +32,7 @@ public final class BlockIds {
     }
 
     public static boolean hotbarMaterial(int id) {
-        return id == LOG || id == LEAVES || id == PLANKS || id == WORKBENCH
+        return id == FURNACE || id == CHEST || id == GLASS || id == LOG || id == LEAVES || id == PLANKS || id == WORKBENCH
                 || id == SANDSTONE || id == STONE_BRICKS || id == SAND
                 || id == GRASS
                 || id == DIRT
