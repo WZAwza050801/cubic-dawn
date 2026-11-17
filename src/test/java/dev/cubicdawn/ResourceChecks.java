@@ -39,5 +39,16 @@ public final class ResourceChecks {
   check("ORE_CAPACITY",!PlayerActions.mineBlock(coal,full,1,2,0,0,0,coal.query(0,0,0).revision()).accepted()
    &&coal.getId(0,0,0)==18&&full.slot(1).durability()==32);
 
+  Inventory upgraded=new Inventory();upgraded.add(ItemIds.IRON_PICKAXE,1);upgraded.damageTool(0);
+  var save=SnapshotIO.parse(SnapshotIO.encode(world,null,world.revision(),upgraded));
+  check("IRON_WEAR_SAVE",save.inventory().get(0).durability()==191);
+  BlockWorld protectedWorld=BlockWorld.generateForestIsland();int[] point={0,0,0};
+  world.forEachSolid((x,y,z,id)->{if(id==18){point[0]=x;point[1]=y;point[2]=z;}});
+  int x=point[0],y=point[1],z=point[2];
+  protectedWorld.breakBlock(55,x,y,z,protectedWorld.query(x,y,z).revision());
+  protectedWorld.placeBlock(56,x,y,z,BlockIds.PLANKS,protectedWorld.query(x,y,z).revision(),null);
+  protectedWorld.seedOreVeins();
+  check("ORE_BUILDING_PROTECTION",protectedWorld.getId(x,y,z)==BlockIds.PLANKS);
+
  }
 }

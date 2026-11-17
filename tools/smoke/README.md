@@ -58,3 +58,11 @@
 沿用独立 Linux :98 显示。`./gradlew classes` 后运行 `java --class-path build/classes/java/main tools/smoke/SurvivalFixture.java`（仅覆盖 build/survival-smoke.txt）。启动 `DISPLAY=:98 ./gradlew run -PworldFile=build/survival-smoke.txt`，看到 Hotbar 后在另一终端运行 `python3 tools/smoke/survival.py`。
 
 脚本验证低生命玩家坠落死亡、R 安全重生、背包/耐久/箱中玻璃不变，并正常退出。随后运行 `DISPLAY=:98 ./gradlew run -PworldFile=build/survival-smoke.txt -Pframes=8` 检查恢复。应有 1807 方块、生命 20、木镐耐久 7、泥土 5、箱内玻璃 3。截图位于 build/ui-smoke/survival-*.png。
+
+## 资源进阶验收
+
+沿用 Linux 独立 :98 显示。`./gradlew classes` 后 `java --class-path build/classes/java/main tools/smoke/ResourceFixture.java`，仅覆盖 build/resource-smoke.txt。启动 `DISPLAY=:98 ./gradlew run -PworldFile=build/resource-smoke.txt`，看到 Hotbar 后运行 `python3 tools/smoke/resources.py`。
+
+脚本验证煤→错误木镐采铁被阻止→石镐采三粗铁→煤燃料炼铁→工作台制铁镐，并正常退出。用同一 worldFile 和 `-Pframes=8` 重启，最终 83 方块、木/石/铁镐耐久分别为 31/93/192。
+
+可选旧岛转换检查：先 `java --class-path build/classes/java/main tools/smoke/ResourceFixture.java upgrade`，用 `-PworldFile=build/ore-upgrade-smoke.txt` 启动，再运行 `python3 tools/smoke/ore_upgrade.py`。只操作测试存档，验证暂停 O 转换和第二次操作无变化。

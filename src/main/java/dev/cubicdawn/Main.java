@@ -9,6 +9,7 @@ import dev.cubicdawn.world.EditHotbar;
 import dev.cubicdawn.world.EditReceipt;
 import dev.cubicdawn.world.FixedStep;
 import dev.cubicdawn.world.Inventory;
+import dev.cubicdawn.world.HarvestRules;
 import dev.cubicdawn.world.ItemIds;
 import dev.cubicdawn.world.MiningProgress;
 import dev.cubicdawn.world.PlayerActions;
@@ -121,6 +122,7 @@ public final class Main {
     private boolean focused = true;
     private boolean paused;
     private final PlayerVitals vitals = new PlayerVitals();
+    private final ButtonEdge oreSeedEdge = new ButtonEdge();
     private final ButtonEdge respawnEdge = new ButtonEdge();
     private boolean inventoryOpen;
     private int[] openContainerPosition;
@@ -239,7 +241,7 @@ public final class Main {
         quadVbo = quadMesh[1];
 
         BlockWorld.generateIsland().checkGeneratedIsland();
-        blocks = BlockWorld.generateForestIsland();
+        blocks = BlockWorld.generateResourceIsland();
         BlockWorld roundTrip = BlockWorld.empty();
         roundTrip.applySnapshot(SnapshotIO.parse(SnapshotIO.encode(blocks, null, blocks.revision(), inventory)));
         if (!roundTrip.sameSolids(blocks)) {
@@ -413,6 +415,7 @@ public final class Main {
 
     private void handleModeKeys() {
         if (!focused) {
+            oreSeedEdge.disarm();
             respawnEdge.disarm();
             pauseEdge.disarm();
             quitEdge.disarm();
@@ -421,6 +424,10 @@ public final class Main {
             openContainerEdge.disarm();
             disarmInventoryButtons();
             return;
+        }
+        if(oreSeedEdge.poll(key(GLFW_KEY_O)) && paused) {
+            int changed=blocks.seedOreVeins();notice="ORE CONVERSION: "+changed+" STONE CELLS";
+            if(changed>0) saveNow("explicit ore conversion");
         }
         if (respawnEdge.poll(key(GLFW_KEY_R)) && !paused && !vitals.alive()) {
             if(placeSpawn()) {
@@ -540,6 +547,8 @@ public final class Main {
             boolean held = mouse(GLFW_MOUSE_BUTTON_LEFT);
             if (!held) miningArmed = true;
             VoxelRay.Hit hit = aim();
+            if(held && hit.kind()==VoxelRay.Kind.HIT && !HarvestRules.allowed(hit.stateId(),inventory.slot(selectedSlot).id()))
+                notice=hit.stateId()==BlockIds.IRON_ORE ? "NEED STONE OR IRON PICKAXE" : "NEED A PICKAXE";
             if (mining.advance(seconds, held && miningArmed, hit, selectedSlot, inventory.slot(selectedSlot).id())) {
                 breakAimed(hit);
             }
@@ -727,7 +736,7 @@ public final class Main {
             drawQuad(width / 2 - 80, height / 2 - 30, Math.round(160 * mining.fraction()), 6, SELECT_COLOR);
         }
         Inventory.Stack held = inventory.slot(selectedSlot);
-        if (ItemIds.tool(held.id())) drawText("USES: " + held.durability() + "/32", left, bottom + size + 25, 1, WHITE);
+        if (ItemIds.tool(held.id())) drawText("USES: " + held.durability() + "/" + ItemIds.durability(held.id()), left, bottom + size + 25, 1, WHITE);
         drawText(notice, 12, height - 38, 1, WHITE);
         drawText("HEALTH "+vitals.health()+"/20",12,height-54,1,SELECT_COLOR);
         if (inventoryOpen) {
@@ -749,7 +758,7 @@ public final class Main {
         }
         if (paused) {
             drawQuad(0, height - 24, width, 24, PAUSE_COLOR);
-            drawText("PAUSED - ESC: RESUME   Q: QUIT", 12, height - 18, 1, WHITE);
+            drawText("PAUSED - ESC: RESUME  Q: QUIT  O: CONVERT ORIGINAL STONE TO ORE", 12, height - 18, 1, WHITE);
         }
         GL11.glEnable(GL11.GL_DEPTH_TEST);
         GL11.glEnable(GL11.GL_CULL_FACE);
@@ -822,7 +831,7 @@ public final class Main {
             if (index < 9) drawText(Integer.toString(index + 1), x + 2, y + 34, 1, WHITE);
         }
         Inventory.Stack selected = inventory.slot(inventorySelection);
-        drawText(blockName(selected.id()) + (ItemIds.tool(selected.id()) ? " USES: " + selected.durability() + "/32" : ""),
+        drawText(blockName(selected.id()) + (ItemIds.tool(selected.id()) ? " USES: " + selected.durability() + "/" + ItemIds.durability(selected.id()) : ""),
                 left + 20, top - 215, 1, WHITE);
         Inventory.Recipe recipe = Inventory.Recipe.values()[recipeSelection];
         drawText("MAKE: " + recipe.amount + " " + blockName(recipe.output)
@@ -1342,6 +1351,10 @@ public final class Main {
     }
 
     private static float[] colorOf(int id) {
+        if(id==BlockIds.COAL_ORE || id==ItemIds.COAL) return new float[]{.20f,.23f,.26f};
+        if(id==BlockIds.IRON_ORE || id==ItemIds.RAW_IRON) return new float[]{.72f,.45f,.32f};
+        if(id==ItemIds.IRON_INGOT || ItemIds.tier(id)==3) return new float[]{.86f,.89f,.92f};
+        if(ItemIds.tier(id)==2) return STONE_COLOR;
         if (id == BlockIds.FURNACE) return new float[]{.30f,.32f,.35f};
         if (id == BlockIds.CHEST) return new float[]{.70f,.42f,.16f};
         if (id == BlockIds.GLASS) return new float[]{.62f,.85f,.91f};
@@ -1380,6 +1393,17 @@ public final class Main {
 
     private static String blockName(int id) {
         return switch (id) {
+            case BlockIds.COAL_ORE -> "coal ore";
+            case BlockIds.IRON_ORE -> "iron ore";
+            case ItemIds.COAL -> "coal";
+            case ItemIds.RAW_IRON -> "raw iron";
+            case ItemIds.IRON_INGOT -> "iron ingot";
+            case ItemIds.STONE_PICKAXE -> "stone pickaxe";
+            case ItemIds.STONE_AXE -> "stone axe";
+            case ItemIds.STONE_SHOVEL -> "stone shovel";
+            case ItemIds.IRON_PICKAXE -> "iron pickaxe";
+            case ItemIds.IRON_AXE -> "iron axe";
+            case ItemIds.IRON_SHOVEL -> "iron shovel";
             case BlockIds.CHEST -> "chest";
             case BlockIds.FURNACE -> "furnace";
             case BlockIds.GLASS -> "glass";
