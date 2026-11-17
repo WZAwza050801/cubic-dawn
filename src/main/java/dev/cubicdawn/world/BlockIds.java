@@ -11,6 +11,7 @@ public final class BlockIds {
     public static final int MARKER_NEGATIVE_X = 5;
     public static final int MARKER_POSITIVE_Z = 6;
     public static final int MARKER_NEGATIVE_Z = 7;
+    public static final int SAND = 8;
     /** 只给支撑测试用，不放进快捷栏。 */
     public static final int SUPPORT_PROBE = 100;
 
@@ -22,7 +23,8 @@ public final class BlockIds {
     }
 
     public static boolean hotbarMaterial(int id) {
-        return id == GRASS
+        return id == SAND
+                || id == GRASS
                 || id == DIRT
                 || id == STONE
                 || (id >= MARKER_POSITIVE_X && id <= MARKER_NEGATIVE_Z);

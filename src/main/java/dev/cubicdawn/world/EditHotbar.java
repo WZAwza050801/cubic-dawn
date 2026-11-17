@@ -13,7 +13,7 @@ public final class EditHotbar {
             BlockIds.MARKER_NEGATIVE_X,
             BlockIds.MARKER_POSITIVE_Z,
             BlockIds.MARKER_NEGATIVE_Z,
-            BlockIds.DIRT,
+            BlockIds.SAND,
             BlockIds.STONE
     };
 

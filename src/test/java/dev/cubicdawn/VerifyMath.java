@@ -2,12 +2,14 @@ package dev.cubicdawn;
 
 import dev.cubicdawn.world.Aabb;
 import dev.cubicdawn.world.BlockIds;
+import dev.cubicdawn.world.BlockTicks;
 import dev.cubicdawn.world.BlockWorld;
 import dev.cubicdawn.world.ButtonEdge;
 import dev.cubicdawn.world.CellKind;
 import dev.cubicdawn.world.CellView;
 import dev.cubicdawn.world.EditHotbar;
 import dev.cubicdawn.world.EditReceipt;
+import dev.cubicdawn.world.FixedStep;
 import dev.cubicdawn.world.PlayerBody;
 import dev.cubicdawn.world.PlayerMotion;
 import dev.cubicdawn.world.PlayerState;
@@ -33,11 +35,62 @@ public final class VerifyMath {
         verify.edits();
         verify.movement();
         verify.input();
+        verify.timing();
         verify.saves();
+        verify.fallingSand();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
-        System.out.println("ALL PASS " + "coordinates rays edits movement input saves");
+        System.out.println("ALL PASS " + "coordinates rays edits movement input saves scheduled-blocks");
+    }
+
+    private void timing() {
+        PlayerMotion.Pose reference = timedMovement(30);
+        boolean same = true;
+        for (int fps : new int[] {60, 120, 144}) {
+            PlayerMotion.Pose other = timedMovement(fps);
+            same &= reference.x == other.x && reference.y == other.y
+                    && reference.z == other.z && reference.velocityY == other.velocityY;
+        }
+        check("TIME01", same, "fixed input diverged at different render rates");
+        FixedStep clock = new FixedStep();
+        int[] ticks = {0};
+        int[] jumps = {0};
+        FixedStep.Tick action = (seconds, jump) -> { ticks[0]++; if (jump) jumps[0]++; };
+        clock.advance(FixedStep.SECONDS / 2, true, true, action);
+        clock.advance(3600, false, false, action);
+        clock.advance(FixedStep.SECONDS / 2, true, false, action);
+        check("TIME02", ticks[0] == 0 && jumps[0] == 0, "pause retained time or jump");
+        clock.advance(FixedStep.SECONDS / 2, true, false, action);
+        int caughtUp = clock.advance(3600, true, false, action);
+        int debt = clock.advance(0, true, false, action);
+        check("TIME03", ticks[0] == 4 && caughtUp == 3 && debt == 0,
+                "long suspension created simulation debt");
+        clock.reset();
+        ticks[0] = 0;
+        clock.advance(FixedStep.SECONDS / 4, true, true, action);
+        clock.advance(FixedStep.SECONDS / 4, true, false, action);
+        clock.advance(FixedStep.SECONDS / 2, true, false, action);
+        clock.advance(FixedStep.SECONDS * 3, true, false, action);
+        check("TIME_JUMP", ticks[0] == 4 && jumps[0] == 1, "jump lost or repeated across ticks");
+        clock.reset();
+        ticks[0] = 0;
+        clock.advance(Double.NaN, true, false, action);
+        clock.advance(Double.POSITIVE_INFINITY, true, false, action);
+        clock.advance(-1, true, false, action);
+        clock.advance(FixedStep.SECONDS, true, false, action);
+        check("TIME_INVALID", ticks[0] == 1, "invalid clock sample poisoned accumulator");
+    }
+
+    private PlayerMotion.Pose timedMovement(int fps) {
+        FixedStep clock = new FixedStep();
+        PlayerMotion.Pose pose = new PlayerMotion.Pose(0, 2, 0, 0);
+        PlayerBody.SolidAt floor = (x, y, z) -> y <= 0;
+        for (int frame = 0; frame < fps * 2; frame++) {
+            clock.advance(1.0 / fps, true, frame == 0, (seconds, jump) ->
+                    PlayerMotion.step(pose, seconds, 1, -1, jump, floor));
+        }
+        return pose;
     }
 
     private void coordinates() {
@@ -435,7 +488,7 @@ public final class VerifyMath {
                 && loaded.player().yaw() == player.yaw()
                 && loaded.player().pitch() == player.pitch()
                 && loaded.player().slot() == 3;
-        check("SAVE01", restored.sameSolids(world) && loaded.version() == 4, "reload");
+        check("SAVE01", restored.sameSolids(world) && loaded.version() == 5, "reload");
         check("SAVE02", playerOk, "player");
 
         BlockWorld edited = BlockWorld.empty();
@@ -494,10 +547,131 @@ public final class VerifyMath {
         BlockWorld second = BlockWorld.empty();
         second.applySnapshot(again);
         check("SAVE08",
-                again.version() == 4
+                again.version() == 5
                         && second.getId(0, 0, 0) == 42
                         && second.getId(1, 2, 3) == BlockIds.STONE,
                 "version=" + again.version());
+    }
+
+    private void fallingSand() throws Exception {
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.STONE, 0, null);
+        world.placeBlock(2, 0, 3, 0, BlockIds.SAND, 0, null);
+        for (int i = 0; i < 3; i++) world.tick(null);
+        Path file = Files.createTempDirectory("cubic-dawn-ticks").resolve("world.txt");
+        SnapshotIO.save(file, world, null);
+        BlockWorld restored = BlockWorld.empty();
+        restored.applySnapshot(SnapshotIO.load(file));
+        check("TASK_SAVE", restored.blockTicks().tick() == 3
+                && restored.blockTicks().tasks().equals(world.blockTicks().tasks()), "pending tasks lost");
+        for (int i = 0; i < 2; i++) restored.tick(null);
+        check("SAND_DELAY", restored.getId(0, 3, 0) == BlockIds.SAND, "fell too soon after load");
+        restored.tick(null);
+        check("SAND_STEP", restored.getId(0, 3, 0) == BlockIds.AIR
+                && restored.getId(0, 2, 0) == BlockIds.SAND && restored.countSolid() == 2, "non-atomic fall");
+        for (int i = 0; i < 18; i++) restored.tick(null);
+        check("SAND_LAND", restored.getId(0, 1, 0) == BlockIds.SAND
+                && restored.blockTicks().tasks().isEmpty(), "did not settle");
+        restored.breakBlock(3, 0, 0, 0, restored.query(0, 0, 0).revision());
+        for (int i = 0; i < 6; i++) restored.tick(null);
+        check("SAND_SUPPORT", restored.getId(0, 0, 0) == BlockIds.SAND, "support removal did not wake sand");
+        // A player below sand must never be buried. Leaving wakes the retry.
+        for (int i = 0; i < 6; i++) restored.tick((x, y, z) -> y == -1);
+        check("SAND_BODY", restored.getId(0, 0, 0) == BlockIds.SAND, "fell into player");
+        restored.setSimulationLoaded(0, -1, 0, false);
+        for (int i = 0; i < 6; i++) restored.tick(null);
+        check("SAND_UNLOADED", restored.getId(0, 0, 0) == BlockIds.SAND, "fell into unknown space");
+        restored.setSimulationLoaded(0, -1, 0, true);
+        for (int i = 0; i < 6; i++) restored.tick(null);
+        check("SAND_RETRY", restored.getId(0, -1, 0) == BlockIds.SAND, "did not retry");
+        for (int i = 0; i < 120; i++) restored.tick(null);
+        check("SAND_BOUNDARY", restored.getId(0, BlockWorld.BLOCK_MIN, 0) == BlockIds.SAND
+                && restored.countSolid() == 1 && restored.blockTicks().tasks().isEmpty(), "sand lost at boundary");
+        BlockWorld stale = BlockWorld.empty();
+        stale.placeBlock(1, 0, 2, 0, BlockIds.SAND, 0, null);
+        stale.breakBlock(2, 0, 2, 0, stale.query(0, 2, 0).revision());
+        stale.placeBlock(3, 0, 2, 0, BlockIds.STONE, stale.query(0, 2, 0).revision(), null);
+        for (int i = 0; i < 6; i++) stale.tick(null);
+        check("SAND_STALE", stale.getId(0, 2, 0) == BlockIds.STONE && stale.countSolid() == 1,
+                "stale task changed replacement block");
+        BlockWorld replaced = BlockWorld.empty();
+        replaced.placeBlock(1, 0, 2, 0, BlockIds.SAND, 0, null);
+        for (int i = 0; i < 3; i++) replaced.tick(null);
+        replaced.breakBlock(2, 0, 2, 0, replaced.query(0, 2, 0).revision());
+        replaced.placeBlock(3, 0, 2, 0, BlockIds.SAND, replaced.query(0, 2, 0).revision(), null);
+        for (int i = 0; i < 3; i++) replaced.tick(null);
+        boolean waited = replaced.getId(0, 2, 0) == BlockIds.SAND;
+        for (int i = 0; i < 3; i++) replaced.tick(null);
+        check("SAND_REPLACE_DELAY", waited && replaced.getId(0, 1, 0) == BlockIds.SAND,
+                "replacement inherited the removed block's timer");
+        BlockWorld stack = BlockWorld.empty();
+        stack.placeBlock(1, 0, 0, 0, BlockIds.STONE, 0, null);
+        stack.placeBlock(2, 0, 1, 0, BlockIds.SAND, 0, null);
+        stack.placeBlock(3, 0, 2, 0, BlockIds.SAND, 0, null);
+        for (int i = 0; i < 6; i++) stack.tick(null);
+        stack.breakBlock(4, 0, 0, 0, stack.query(0, 0, 0).revision());
+        for (int i = 0; i < 12; i++) stack.tick(null);
+        check("SAND_STACK", stack.getId(0, 2, 0) == BlockIds.AIR && stack.countSolid() == 2,
+                "stack did not wake or lost sand");
+        BlockTicks queue = new BlockTicks();
+        for (int x = -16; x <= 16; x++) for (int z = -16; z <= 16; z++) {
+            queue.schedule(x, 0, z);
+            queue.schedule(x, 0, z);
+        }
+        for (int i = 0; i < 5; i++) queue.advance();
+        var due = queue.advance();
+        check("TASK_BUDGET", due.size() == 256 && queue.tasks().size() == 1089 - 256
+                && due.get(0).x() == -16 && due.get(0).z() == -16, "budget/order/dedup");
+        String v4 = checkedSave("cubic-dawn-blocks 4\nseed 20261116\nrevision 1\n0 0 0 42\n");
+        SnapshotIO.Snapshot old = SnapshotIO.parse(v4);
+        check("SAVE_V4", old.version() == 4 && old.tasks().isEmpty() && old.simulationTick() == 0
+                && old.unknownIds().contains(42), "v4 migration");
+        boolean rejected = true;
+        for (String bad : new String[] {
+                "tick -1\n", "tick 0\ntick 1\n", "", "tick 0\nfall -1 0 0 0\n",
+                "tick 0\nfall 6 17 0 0\n", "tick 0\nfall 6 0 0 0\nfall 7 0 0 0\n"}) {
+            try { SnapshotIO.parse(checkedSave("cubic-dawn-blocks 5\n" + bad)); rejected = false; }
+            catch (IllegalArgumentException | IllegalStateException expected) { }
+        }
+        check("TASK_INVALID", rejected, "invalid scheduler state accepted");
+        boolean sameRates = true;
+        String reference = null;
+        for (int fps : new int[] {30, 60, 120, 144}) {
+            BlockWorld falling = BlockWorld.empty();
+            falling.placeBlock(1, 0, 10, 0, BlockIds.SAND, 0, null);
+            FixedStep clock = new FixedStep();
+            for (int frame = 0; frame < fps; frame++) {
+                clock.advance(1.0 / fps, true, false, (seconds, jump) -> falling.tick(null));
+            }
+            String state = SnapshotIO.encode(falling, null, falling.revision());
+            if (reference == null) reference = state;
+            sameRates &= reference.equals(state);
+            long beforePause = falling.blockTicks().tick();
+            clock.advance(3600, false, false, (seconds, jump) -> falling.tick(null));
+            sameRates &= beforePause == falling.blockTicks().tick();
+        }
+        check("TASK_RATE_PAUSE", sameRates, "frame rate or paused wall time changed tasks");
+        String tampered = Files.readString(file).replace("fall 6 ", "fall 7 ");
+        boolean checksumRejected = false;
+        try { SnapshotIO.parse(tampered); }
+        catch (IllegalStateException expected) { checksumRejected = expected.getMessage().contains("checksum"); }
+        check("TASK_CHECKSUM", checksumRejected, "task not covered by checksum");
+        // Resume must produce the same world and queue as uninterrupted simulation.
+        for (int i = 0; i < 21; i++) world.tick(null);
+        BlockWorld resumed = BlockWorld.empty();
+        resumed.applySnapshot(SnapshotIO.load(file));
+        for (int i = 0; i < 21; i++) resumed.tick(null);
+        check("TASK_RESUME", world.sameSolids(resumed)
+                && world.blockTicks().tick() == resumed.blockTicks().tick()
+                && world.blockTicks().tasks().equals(resumed.blockTicks().tasks()), "save/resume diverged");
+    }
+
+    private static String checkedSave(String canonical) throws Exception {
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        int newline = canonical.indexOf('\n');
+        return canonical.substring(0, newline + 1) + "checksum sha256 "
+                + java.util.HexFormat.of().formatHex(digest) + "\n" + canonical.substring(newline + 1);
     }
 
     private void check(String id, boolean passed, String detail) {
