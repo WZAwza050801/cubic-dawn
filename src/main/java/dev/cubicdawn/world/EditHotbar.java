@@ -1,6 +1,6 @@
 package dev.cubicdawn.world;
 
-/** edit_test 快捷栏。数量不减少，不能当成生存模式的物品。 */
+/** 旧编辑验收的材料表。游戏实际快捷栏使用 Inventory 的前 9 格及其数量。 */
 public final class EditHotbar {
 
     public static final int SLOTS = 9;
