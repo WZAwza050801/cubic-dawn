@@ -48,6 +48,7 @@ public final class VerifyMath {
         verify.mining();
         ProductionChecks.run();
         SurvivalChecks.run();
+        ResourceChecks.run();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }

@@ -53,6 +53,23 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         return world;
     }
 
+    public static BlockWorld generateResourceIsland() {
+        BlockWorld world=generateForestIsland();world.seedOreVeins();return world;
+    }
+    /** Explicit migration utility: only fixed underground stone cells, never air or other materials. */
+    public int seedOreVeins() {
+        int changed=0;
+        for(int x=-8;x<=8;x++) for(int z=-8;z<=8;z++) for(int depth=2;depth<=3;depth++) {
+            int marker=Math.floorMod(x*31+z*17+depth*13,23);
+            if(marker!=0 && marker!=7) continue;
+            int y=surface(x,z)-depth;CellView cell=query(x,y,z);
+            if(cell.kind()!=CellKind.KNOWN || cell.id()!=BlockIds.STONE) continue;
+            put(x,y,z,marker==0 ? BlockIds.COAL_ORE : BlockIds.IRON_ORE,cell.revision()+1);changed++;
+        }
+        if(changed>0) { revision++;dirty=true; }
+        return changed;
+    }
+
     public static BlockWorld generateForestIsland() {
         BlockWorld world = generateIsland();
         world.plantTree(-1, -5, surface(-5, -4) + 1, -4, null);
