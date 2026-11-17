@@ -9,5 +9,6 @@ public final class ItemIds {
     public static final int SAPLING = 205;
     private ItemIds() { }
     public static boolean tool(int id) { return id >= WOOD_PICKAXE && id <= WOOD_SHOVEL; }
+    public static int durability(int id) { return tool(id) ? 32 : 0; }
     public static int stackLimit(int id) { return tool(id) ? 1 : Inventory.STACK_LIMIT; }
 }

@@ -46,6 +46,7 @@ public final class VerifyMath {
         verify.trees();
         verify.woodCrafting();
         verify.mining();
+        ProductionChecks.run();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
@@ -496,7 +497,7 @@ public final class VerifyMath {
                 && loaded.player().yaw() == player.yaw()
                 && loaded.player().pitch() == player.pitch()
                 && loaded.player().slot() == 3;
-        check("SAVE01", restored.sameSolids(world) && loaded.version() == 6, "reload");
+        check("SAVE01", restored.sameSolids(world) && loaded.version() == 7, "reload");
         check("SAVE02", playerOk, "player");
 
         BlockWorld edited = BlockWorld.empty();
@@ -555,7 +556,7 @@ public final class VerifyMath {
         BlockWorld second = BlockWorld.empty();
         second.applySnapshot(again);
         check("SAVE08",
-                again.version() == 6
+                again.version() == 7
                         && second.getId(0, 0, 0) == 42
                         && second.getId(1, 2, 3) == BlockIds.STONE,
                 "version=" + again.version());
@@ -749,7 +750,7 @@ public final class VerifyMath {
         SnapshotIO.save(file, world, null, crafting);
         var snapshot = SnapshotIO.load(file);
         Inventory recovered = Inventory.restore(snapshot.inventory());
-        check("INV_SAVE", snapshot.version() == 6 && recovered.snapshot().equals(crafting.snapshot())
+        check("INV_SAVE", snapshot.version() == 7 && recovered.snapshot().equals(crafting.snapshot())
                 && recovered.count(42) == 2, "inventory reload or unknown id lost");
         Inventory exhausted = new Inventory();
         SnapshotIO.save(file, world, null, exhausted);

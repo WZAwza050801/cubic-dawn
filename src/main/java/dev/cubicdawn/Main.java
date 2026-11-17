@@ -553,7 +553,7 @@ public final class Main {
             System.out.println("Break rejected: reach");
             return;
         }
-        EditReceipt receipt = PlayerActions.breakBlock(blocks, inventory, nextCommand++, hit.x(), hit.y(), hit.z(), hit.revision());
+        EditReceipt receipt = PlayerActions.mineBlock(blocks, inventory, selectedSlot, nextCommand++, hit.x(), hit.y(), hit.z(), hit.revision());
         if (!receipt.accepted()) {
             notice = receipt.reason().replace('_', ' ');
             System.out.println("Break rejected: " + explain(receipt.reason()));
@@ -686,6 +686,8 @@ public final class Main {
             drawQuad(width / 2 - 80, height / 2 - 30, 160, 6, PAUSE_COLOR);
             drawQuad(width / 2 - 80, height / 2 - 30, Math.round(160 * mining.fraction()), 6, SELECT_COLOR);
         }
+        Inventory.Stack held = inventory.slot(selectedSlot);
+        if (ItemIds.tool(held.id())) drawText("USES: " + held.durability() + "/32", left, bottom + size + 25, 1, WHITE);
         drawText(notice, 12, height - 38, 1, WHITE);
         if (inventoryOpen) drawInventory(width, height);
         if (!inventoryOpen) {
@@ -768,7 +770,9 @@ public final class Main {
             }
             if (index < 9) drawText(Integer.toString(index + 1), x + 2, y + 34, 1, WHITE);
         }
-        drawText(blockName(inventory.slot(inventorySelection).id()), left + 20, top - 215, 1, WHITE);
+        Inventory.Stack selected = inventory.slot(inventorySelection);
+        drawText(blockName(selected.id()) + (ItemIds.tool(selected.id()) ? " USES: " + selected.durability() + "/32" : ""),
+                left + 20, top - 215, 1, WHITE);
         Inventory.Recipe recipe = Inventory.Recipe.values()[recipeSelection];
         drawText("MAKE: " + recipe.amount + " " + blockName(recipe.output)
                 + (recipe.needsBench ? " (BENCH)" : ""), left + 20, top - 239, 1, SELECT_COLOR);
