@@ -257,6 +257,18 @@ public final class BlockWorld implements VoxelRay.WorldProbe {
         acceptedCommands.clear();
     }
 
+    public boolean nearWorkbench(float x, float y, float z) {
+        for (int bx = (int) Math.floor(x - 3); bx <= Math.ceil(x + 3); bx++)
+            for (int by = (int) Math.floor(y - 3); by <= Math.ceil(y + 3); by++)
+                for (int bz = (int) Math.floor(z - 3); bz <= Math.ceil(z + 3); bz++) {
+                    float dx = bx - x, dy = by - y, dz = bz - z;
+                    CellView cell = query(bx, by, bz);
+                    if (dx * dx + dy * dy + dz * dz <= 9 && cell.kind() == CellKind.KNOWN
+                            && cell.id() == BlockIds.WORKBENCH) return true;
+                }
+        return false;
+    }
+
     public BlockTicks blockTicks() { return blockTicks; }
 
     private void scheduleSand(int x, int y, int z) {

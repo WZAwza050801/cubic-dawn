@@ -8,7 +8,7 @@ public final class Inventory {
     public static final int STACK_LIMIT = 64;
     public record Stack(int id, int count) {
         public Stack {
-            if (id < 0 || id > 65535 || count < 0 || count > STACK_LIMIT
+            if (id < 0 || id > 65535 || count < 0 || count > ItemIds.stackLimit(id)
                     || (id == 0) != (count == 0)) throw new IllegalArgumentException("Invalid item stack");
         }
     }
@@ -41,14 +41,14 @@ public final class Inventory {
     public boolean add(int id, int count) {
         if (id <= 0 || id > 65535 || count <= 0) throw new IllegalArgumentException("Invalid items");
         int capacity = 0;
-        for (Stack stack : slots) if (stack.id() == id || stack.id() == 0) capacity += STACK_LIMIT - stack.count();
+        for (Stack stack : slots) if (stack.id() == id || stack.id() == 0) capacity += ItemIds.stackLimit(id) - stack.count();
         if (capacity < count) return false;
         int remaining = count;
         // Fill existing stacks before occupying empty slots.
         for (int pass = 0; pass < 2; pass++) for (int i = 0; i < SLOTS && remaining > 0; i++) {
             Stack stack = slots[i];
             if (pass == 0 ? stack.id() != id : stack.id() != 0) continue;
-            int amount = Math.min(STACK_LIMIT - stack.count(), remaining);
+            int amount = Math.min(ItemIds.stackLimit(id) - stack.count(), remaining);
             slots[i] = new Stack(id, stack.count() + amount);
             remaining -= amount;
         }
@@ -63,23 +63,38 @@ public final class Inventory {
     public void swap(int first, int second) {
         Stack temporary = slots[first]; slots[first] = slots[second]; slots[second] = temporary;
     }
+    public record Ingredient(int id, int amount) { }
     public enum Recipe {
-        SANDSTONE(BlockIds.SAND, 4, BlockIds.SANDSTONE, 1),
-        STONE_BRICKS(BlockIds.STONE, 4, BlockIds.STONE_BRICKS, 4);
-        public final int input, cost, output, amount;
-        Recipe(int input, int cost, int output, int amount) {
-            this.input = input; this.cost = cost; this.output = output; this.amount = amount;
+        SANDSTONE(BlockIds.SANDSTONE, 1, false, new Ingredient(BlockIds.SAND, 4)),
+        STONE_BRICKS(BlockIds.STONE_BRICKS, 4, false, new Ingredient(BlockIds.STONE, 4)),
+        PLANKS(BlockIds.PLANKS, 4, false, new Ingredient(BlockIds.LOG, 1)),
+        STICKS(ItemIds.STICK, 4, false, new Ingredient(BlockIds.PLANKS, 2)),
+        WORKBENCH(BlockIds.WORKBENCH, 1, false, new Ingredient(BlockIds.PLANKS, 4)),
+        SAPLING(ItemIds.SAPLING, 1, false, new Ingredient(BlockIds.DIRT, 4)),
+        PICKAXE(ItemIds.WOOD_PICKAXE, 1, true, new Ingredient(BlockIds.PLANKS, 3), new Ingredient(ItemIds.STICK, 2)),
+        AXE(ItemIds.WOOD_AXE, 1, true, new Ingredient(BlockIds.PLANKS, 3), new Ingredient(ItemIds.STICK, 2)),
+        SHOVEL(ItemIds.WOOD_SHOVEL, 1, true, new Ingredient(BlockIds.PLANKS, 1), new Ingredient(ItemIds.STICK, 2));
+        public final int output, amount;
+        public final boolean needsBench;
+        public final List<Ingredient> ingredients;
+        Recipe(int output, int amount, boolean needsBench, Ingredient... ingredients) {
+            this.output = output; this.amount = amount; this.needsBench = needsBench;
+            this.ingredients = List.of(ingredients);
         }
     }
-    public boolean craft(Recipe recipe) {
-        if (count(recipe.input) < recipe.cost) return false;
+    public boolean craft(Recipe recipe) { return craft(recipe, false); }
+    public boolean craft(Recipe recipe, boolean nearWorkbench) {
+        if (recipe.needsBench && !nearWorkbench) return false;
+        for (Ingredient input : recipe.ingredients) if (count(input.id()) < input.amount()) return false;
         Inventory next = copy();
-        int remaining = recipe.cost;
-        for (int i = 0; i < SLOTS && remaining > 0; i++) {
-            if (next.slot(i).id() != recipe.input) continue;
-            int amount = Math.min(remaining, next.slot(i).count());
-            next.remove(i, amount);
-            remaining -= amount;
+        for (Ingredient input : recipe.ingredients) {
+            int remaining = input.amount();
+            for (int i = 0; i < SLOTS && remaining > 0; i++) {
+                if (next.slot(i).id() != input.id()) continue;
+                int amount = Math.min(remaining, next.slot(i).count());
+                next.remove(i, amount);
+                remaining -= amount;
+            }
         }
         if (!next.add(recipe.output, recipe.amount)) return false;
         System.arraycopy(next.slots, 0, slots, 0, SLOTS);

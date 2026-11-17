@@ -4,6 +4,7 @@ import dev.cubicdawn.world.Aabb;
 import dev.cubicdawn.world.BlockIds;
 import dev.cubicdawn.world.BlockTicks;
 import dev.cubicdawn.world.Inventory;
+import dev.cubicdawn.world.ItemIds;
 import dev.cubicdawn.world.PlayerActions;
 import dev.cubicdawn.world.BlockWorld;
 import dev.cubicdawn.world.ButtonEdge;
@@ -42,6 +43,7 @@ public final class VerifyMath {
         verify.fallingSand();
         verify.inventory();
         verify.trees();
+        verify.woodCrafting();
         if (!verify.failures.isEmpty()) {
             throw new IllegalStateException("Failed: " + verify.failures);
         }
@@ -811,6 +813,45 @@ public final class VerifyMath {
         BlockWorld edge = BlockWorld.empty();
         edge.placeBlock(1, 16, 0, 0, BlockIds.DIRT, 0, null);
         check("TREE_BOUNDARY", !edge.plantTree(2, 16, 1, 0, null).accepted() && edge.countSolid() == 1, "boundary overwrite");
+    }
+
+    private void woodCrafting() throws Exception {
+        Inventory bag = new Inventory();
+        bag.add(BlockIds.LOG, 4);
+        check("WOOD_PLANKS", bag.craft(Inventory.Recipe.PLANKS) && bag.count(BlockIds.PLANKS) == 4, "log recipe");
+        bag.craft(Inventory.Recipe.PLANKS);
+        bag.craft(Inventory.Recipe.STICKS);
+        check("WOOD_STICKS", bag.count(ItemIds.STICK) == 4 && bag.count(BlockIds.PLANKS) == 6, "stick recipe");
+        var before = bag.snapshot();
+        check("TOOL_BENCH_GATE", !bag.craft(Inventory.Recipe.PICKAXE) && before.equals(bag.snapshot()), "no bench consumed material");
+        check("TOOL_MULTIPLE_INPUTS", bag.craft(Inventory.Recipe.PICKAXE, true)
+                && bag.count(BlockIds.PLANKS) == 3 && bag.count(ItemIds.STICK) == 2
+                && bag.count(ItemIds.WOOD_PICKAXE) == 1, "multi-input crafting");
+        bag.add(ItemIds.WOOD_PICKAXE, 2);
+        check("TOOL_NONSTACK", bag.snapshot().stream().filter(t -> t.id() == ItemIds.WOOD_PICKAXE).count() == 3
+                && bag.snapshot().stream().filter(t -> ItemIds.tool(t.id())).allMatch(t -> t.count() == 1), "tool stacking");
+        Inventory incomplete = new Inventory(); incomplete.add(BlockIds.PLANKS, 3);
+        var unchanged = incomplete.snapshot();
+        check("TOOL_MISSING_INPUT", !incomplete.craft(Inventory.Recipe.AXE, true)
+                && unchanged.equals(incomplete.snapshot()), "partial recipe consumed planks");
+        BlockWorld world = BlockWorld.empty();
+        world.placeBlock(1, 0, 0, 0, BlockIds.WORKBENCH, 0, null);
+        check("BENCH_DISTANCE", world.nearWorkbench(3, 0, 0) && !world.nearWorkbench(3.01f, 0, 0), "bench radius");
+        world.setSimulationLoaded(0, 0, 0, false);
+        check("BENCH_UNLOADED", !world.nearWorkbench(0, 0, 0), "unloaded bench granted access");
+        world.setSimulationLoaded(0, 0, 0, true);
+        Path file = Files.createTempDirectory("cubic-dawn-tools").resolve("world.txt");
+        SnapshotIO.save(file, world, null, bag);
+        check("TOOL_SAVE", SnapshotIO.load(file).inventory().equals(bag.snapshot()), "tool save");
+        Inventory seeds = new Inventory(); seeds.add(BlockIds.DIRT, 4);
+        check("SAPLING_RECIPE", seeds.craft(Inventory.Recipe.SAPLING) && seeds.count(ItemIds.SAPLING) == 1, "old-island recipe");
+        world.placeBlock(2, 5, 0, 0, BlockIds.DIRT, 0, null);
+        int slot = 0;
+        check("SAPLING_PLACE", PlayerActions.placeBlock(world, seeds, slot, 3, 5, 1, 0, 0, null).accepted()
+                && seeds.count(ItemIds.SAPLING) == 0 && world.getId(5, 1, 0) == BlockIds.LOG, "planting transaction");
+        seeds.add(ItemIds.SAPLING, 1);
+        check("SAPLING_FAIL", !PlayerActions.placeBlock(world, seeds, 0, 4, 8, 1, 0, 0, null).accepted()
+                && seeds.count(ItemIds.SAPLING) == 1, "failed planting consumed seed");
     }
 
     private void check(String id, boolean passed, String detail) {
