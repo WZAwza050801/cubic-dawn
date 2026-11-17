@@ -11,7 +11,7 @@ public final class MiningProgress {
 
     public boolean advance(float seconds, boolean held, VoxelRay.Hit hit, int selectedSlot, int item) {
         if (!held || hit.kind() != VoxelRay.Kind.HIT || hit.distance() > 5
-                || !Float.isFinite(seconds) || seconds <= 0) {
+                || !HarvestRules.allowed(hit.stateId(),item) || !Float.isFinite(seconds) || seconds <= 0) {
             reset(); return false;
         }
         if (target == null || target.x() != hit.x() || target.y() != hit.y() || target.z() != hit.z()
@@ -27,13 +27,13 @@ public final class MiningProgress {
     public static float secondsFor(int block, int item) {
         if (block == BlockIds.LEAVES) return 0.15f;
         if (block == BlockIds.LOG || block == BlockIds.PLANKS || block == BlockIds.WORKBENCH) {
-            return item == ItemIds.WOOD_AXE ? 0.3f : 0.9f;
+            return ItemIds.axe(item) ? (ItemIds.tier(item)==3 ? .125f : ItemIds.tier(item)==2 ? .2f : .3f) : .9f;
         }
-        if (block == BlockIds.STONE || block == BlockIds.STONE_BRICKS || block == BlockIds.SANDSTONE) {
-            return item == ItemIds.WOOD_PICKAXE ? 0.6f : 1.8f;
+        if (block == BlockIds.COAL_ORE || block == BlockIds.IRON_ORE || block == BlockIds.STONE || block == BlockIds.STONE_BRICKS || block == BlockIds.SANDSTONE) {
+            return ItemIds.pickaxe(item) ? (ItemIds.tier(item)==3 ? .25f : ItemIds.tier(item)==2 ? .4f : .6f) : 1.8f;
         }
         if (block == BlockIds.GRASS || block == BlockIds.DIRT || block == BlockIds.SAND) {
-            return item == ItemIds.WOOD_SHOVEL ? 0.15f : 0.4f;
+            return ItemIds.shovel(item) ? (ItemIds.tier(item)==3 ? .075f : ItemIds.tier(item)==2 ? .1f : .15f) : .4f;
         }
         return 0.5f;
     }

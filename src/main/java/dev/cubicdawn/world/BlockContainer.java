@@ -18,7 +18,7 @@ public final class BlockContainer {
             if (type == BlockIds.FURNACE) {
                 if ((items.get(0).count() > 0 && resultFor(items.get(0).id()) == 0)
                         || (items.get(1).count() > 0 && fuelTicks(items.get(1).id()) == 0)
-                        || (items.get(2).count() > 0 && items.get(2).id() != BlockIds.GLASS && items.get(2).id() != ItemIds.CHARCOAL)
+                        || (items.get(2).count() > 0 && items.get(2).id() != BlockIds.GLASS && items.get(2).id() != ItemIds.CHARCOAL && items.get(2).id() != ItemIds.IRON_INGOT)
                         || (progress > 0 && items.get(0).count() == 0)) throw new IllegalArgumentException("Invalid furnace slots");
             }
         }
@@ -46,10 +46,10 @@ public final class BlockContainer {
         return container;
     }
     public static int resultFor(int input) {
-        return input == BlockIds.SAND ? BlockIds.GLASS : input == BlockIds.LOG ? ItemIds.CHARCOAL : 0;
+        return input==ItemIds.RAW_IRON ? ItemIds.IRON_INGOT : input == BlockIds.SAND ? BlockIds.GLASS : input == BlockIds.LOG ? ItemIds.CHARCOAL : 0;
     }
     public static int fuelTicks(int input) {
-        return input == ItemIds.CHARCOAL ? 1200 : input == BlockIds.LOG ? 600
+        return input == ItemIds.CHARCOAL || input==ItemIds.COAL ? 1200 : input == BlockIds.LOG ? 600
                 : input == BlockIds.PLANKS ? 300 : input == ItemIds.STICK ? 60 : 0;
     }
     public boolean deposit(Inventory source, int sourceSlot, boolean fuel) {

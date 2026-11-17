@@ -95,7 +95,13 @@ public final class Inventory {
         SHOVEL(ItemIds.WOOD_SHOVEL, 1, true, new Ingredient(BlockIds.PLANKS, 1), new Ingredient(ItemIds.STICK, 2)),
         SAPLING_FROM_LEAVES(ItemIds.SAPLING, 1, false, new Ingredient(BlockIds.LEAVES, 4)),
         FURNACE(BlockIds.FURNACE, 1, true, new Ingredient(BlockIds.STONE, 8)),
-        CHEST(BlockIds.CHEST, 1, true, new Ingredient(BlockIds.PLANKS, 8));
+        CHEST(BlockIds.CHEST, 1, true, new Ingredient(BlockIds.PLANKS, 8)),
+        STONE_PICKAXE(ItemIds.STONE_PICKAXE,1,true,new Ingredient(BlockIds.STONE,3),new Ingredient(ItemIds.STICK,2)),
+        STONE_AXE(ItemIds.STONE_AXE,1,true,new Ingredient(BlockIds.STONE,3),new Ingredient(ItemIds.STICK,2)),
+        STONE_SHOVEL(ItemIds.STONE_SHOVEL,1,true,new Ingredient(BlockIds.STONE,1),new Ingredient(ItemIds.STICK,2)),
+        IRON_PICKAXE(ItemIds.IRON_PICKAXE,1,true,new Ingredient(ItemIds.IRON_INGOT,3),new Ingredient(ItemIds.STICK,2)),
+        IRON_AXE(ItemIds.IRON_AXE,1,true,new Ingredient(ItemIds.IRON_INGOT,3),new Ingredient(ItemIds.STICK,2)),
+        IRON_SHOVEL(ItemIds.IRON_SHOVEL,1,true,new Ingredient(ItemIds.IRON_INGOT,1),new Ingredient(ItemIds.STICK,2));
         public final int output, amount;
         public final boolean needsBench;
         public final List<Ingredient> ingredients;

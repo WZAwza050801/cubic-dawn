@@ -5,16 +5,22 @@ public final class PlayerActions {
     private PlayerActions() { }
     public static EditReceipt breakBlock(BlockWorld world, Inventory inventory, long command,
                                          int x, int y, int z, int expectedRevision) {
+        return harvest(world,inventory,0,command,x,y,z,expectedRevision);
+    }
+    private static EditReceipt harvest(BlockWorld world,Inventory inventory,int held,long command,
+                                       int x,int y,int z,int expectedRevision) {
         CellView cell = world.query(x, y, z);
+        if(!HarvestRules.allowed(cell.id(),held)) return EditReceipt.reject("need_correct_pickaxe");
+        int drop=HarvestRules.drop(cell.id());
         if (cell.kind() == CellKind.KNOWN && cell.id() != BlockIds.AIR
-                && !inventory.canAdd(cell.id(), 1)) return EditReceipt.reject("inventory_full");
+                && !inventory.canAdd(drop, 1)) return EditReceipt.reject("inventory_full");
         EditReceipt result = world.breakBlock(command, x, y, z, expectedRevision);
-        if (result.accepted()) inventory.add(cell.id(), 1);
+        if (result.accepted()) inventory.add(drop, 1);
         return result;
     }
     public static EditReceipt mineBlock(BlockWorld world, Inventory inventory, int toolSlot, long command,
                                         int x, int y, int z, int expectedRevision) {
-        EditReceipt result = breakBlock(world, inventory, command, x, y, z, expectedRevision);
+        EditReceipt result = harvest(world, inventory, inventory.slot(toolSlot).id(), command, x, y, z, expectedRevision);
         if (result.accepted()) inventory.damageTool(toolSlot);
         return result;
     }
