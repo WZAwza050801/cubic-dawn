@@ -3,7 +3,7 @@ package dev.cubicdawn;
 import dev.cubicdawn.world.*;
 
 public final class ProductionChecks {
-    public static void run() throws Exception { durability(); furnace(); }
+    public static void run() throws Exception { durability(); furnace(); chest(); }
     private static void check(String name, boolean condition) {
         if (!condition) throw new IllegalStateException("FAIL " + name);
         System.out.println("PASS " + name);
@@ -65,6 +65,31 @@ public final class ProductionChecks {
                 java.util.List.of(new Inventory.Stack(BlockIds.SAND,1),new Inventory.Stack(BlockIds.PLANKS,1),new Inventory.Stack(BlockIds.GLASS,64))));
         for(int i=0;i<200;i++) blocked.tick();
         check("FURNACE_BLOCKED", blocked.slot(1).count()==1 && blocked.burn()==0 && blocked.progress()==0);
+    }
+
+    private static void chest() {
+        BlockWorld world=BlockWorld.empty(); world.placeBlock(1,0,0,0,BlockIds.CHEST,0,null);
+        BlockContainer chest=world.containerAt(0,0,0); Inventory bag=new Inventory();
+        bag.add(ItemIds.WOOD_AXE,1); bag.damageTool(0);
+        check("CHEST_DEPOSIT",chest.deposit(bag,0,false) && bag.count(ItemIds.WOOD_AXE)==0 && chest.slot(0).durability()==31);
+        check("CHEST_BREAK_GUARD",!world.breakBlock(2,0,0,0,world.query(0,0,0).revision()).accepted());
+        var snap=SnapshotIO.parse(SnapshotIO.encode(world,null,world.revision(),bag));
+        BlockWorld copy=BlockWorld.empty(); copy.applySnapshot(snap);
+        check("CHEST_SAVE",copy.containerStates().equals(world.containerStates()));
+        Inventory full=new Inventory();full.add(BlockIds.DIRT,27*64);
+        check("CHEST_FULL",!chest.withdraw(full,0) && chest.slot(0).durability()==31);
+        check("CHEST_WITHDRAW",chest.withdraw(bag,0) && bag.slot(0).durability()==31);
+        check("CHEST_EMPTY_BREAK",world.breakBlock(3,0,0,0,world.query(0,0,0).revision()).accepted()
+                && world.containerStates().isEmpty());
+        Inventory sourceFull=new Inventory(); sourceFull.add(BlockIds.DIRT,27*64);
+        BlockContainer packed=new BlockContainer(BlockIds.CHEST);
+        for(int i=0;i<27;i++) packed.deposit(sourceFull,i,false);
+        sourceFull.add(BlockIds.STONE,1);
+        check("CHEST_FULL_DEPOSIT",!packed.deposit(sourceFull,0,false) && sourceFull.count(BlockIds.STONE)==1);
+        // Independent capacity/merge check through ordinary transfers.
+        BlockContainer merge=new BlockContainer(BlockIds.CHEST); Inventory source=new Inventory();
+        source.add(BlockIds.SAND,40); merge.deposit(source,0,false); source.add(BlockIds.SAND,30); merge.deposit(source,0,false);
+        check("CHEST_MERGE",merge.slot(0).count()==64 && merge.slot(1).count()==6);
     }
 
 }

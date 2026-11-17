@@ -1,6 +1,7 @@
 package dev.cubicdawn;
 
 import dev.cubicdawn.world.BlockIds;
+import dev.cubicdawn.world.BlockContainer;
 import dev.cubicdawn.world.BlockWorld;
 import dev.cubicdawn.world.ButtonEdge;
 import dev.cubicdawn.world.CellView;
@@ -118,6 +119,11 @@ public final class Main {
     private boolean focused = true;
     private boolean paused;
     private boolean inventoryOpen;
+    private int[] openContainerPosition;
+    private int containerSelection;
+    private final ButtonEdge openContainerEdge = new ButtonEdge();
+    private final ButtonEdge[] containerEdges = new ButtonEdge[5];
+    { for (int i=0;i<containerEdges.length;i++) containerEdges[i]=new ButtonEdge(); }
     private final MiningProgress mining = new MiningProgress();
     private boolean miningArmed = true;
     private int recipeSelection;
@@ -179,7 +185,7 @@ public final class Main {
         if (window == NULL) {
             throw new IllegalStateException("Window creation failed.");
         }
-        glfwSetWindowSizeLimits(window, 600, 420, GLFW_DONT_CARE, GLFW_DONT_CARE);
+        glfwSetWindowSizeLimits(window, 800, 520, GLFW_DONT_CARE, GLFW_DONT_CARE);
         glfwMakeContextCurrent(window);
         glfwSwapInterval(1);
         glfwShowWindow(window);
@@ -210,7 +216,7 @@ public final class Main {
         System.out.println("Java: " + System.getProperty("java.version"));
         System.out.println("LWJGL: " + Version.getVersion());
         System.out.println("OpenGL: " + GL11.glGetString(GL11.GL_VERSION));
-        System.out.println("Hold left to collect, right place or plant, 1-9 or wheel selects, E inventory, Esc pauses, Q quits while paused, F5 saves.");
+        System.out.println("Hold left to collect, right place or plant, F opens chest/furnace, 1-9 or wheel selects, E inventory, Esc pauses, Q quits while paused, F5 saves.");
         System.out.println("Slot 8: sand falls one cell every 6 simulation ticks; project sandbox rule.");
         System.out.println("Java Edition mechanics version: not set. Finite starter materials and project crafting rules.");
 
@@ -401,11 +407,21 @@ public final class Main {
             quitEdge.disarm();
             saveEdge.disarm();
             inventoryEdge.disarm();
+            openContainerEdge.disarm();
             disarmInventoryButtons();
             return;
         }
+        if (openContainerEdge.poll(key(GLFW_KEY_F)) && playing()) {
+            VoxelRay.Hit hit=aim();
+            if (hit.kind()==VoxelRay.Kind.HIT && blocks.containerAt(hit.x(),hit.y(),hit.z())!=null) {
+                openContainerPosition=new int[]{hit.x(),hit.y(),hit.z()};
+                inventoryOpen=true; inventorySelection=selectedSlot; containerSelection=0;
+                cursorReady=false; disarmPlayButtons(); disarmInventoryButtons(); updateCursorMode();
+            } else notice="AIM AT A CHEST OR FURNACE TO OPEN";
+        }
         if (inventoryEdge.poll(key(GLFW_KEY_E)) && !paused) {
             inventoryOpen = !inventoryOpen;
+            openContainerPosition=null;
             inventorySelection = selectedSlot;
             cursorReady = false;
             disarmPlayButtons();
@@ -413,7 +429,7 @@ public final class Main {
             updateCursorMode();
         }
         if (pauseEdge.poll(key(GLFW_KEY_ESCAPE))) {
-            if (inventoryOpen) inventoryOpen = false;
+            if (inventoryOpen) { inventoryOpen = false; openContainerPosition=null; }
             else paused = !paused;
             cursorReady = false;
             disarmPlayButtons();
@@ -680,7 +696,7 @@ public final class Main {
             drawText(Integer.toString(index + 1), x + 2, bottom + size - 9, 1, WHITE);
             if (stack.count() > 0) drawText(Integer.toString(stack.count()), x + 12, bottom + 3, 1, WHITE);
         }
-        drawText("E: INVENTORY   F5: SAVE   ESC: PAUSE", 12, height - 22, 1, WHITE);
+        drawText("E: INVENTORY   F: OPEN   F5: SAVE   ESC: PAUSE", 12, height - 22, 1, WHITE);
         drawText(blockName(inventory.slot(selectedSlot).id()), left, bottom + size + 12, 1, WHITE);
         if (mining.fraction() > 0 && !inventoryOpen) {
             drawQuad(width / 2 - 80, height / 2 - 30, 160, 6, PAUSE_COLOR);
@@ -689,7 +705,10 @@ public final class Main {
         Inventory.Stack held = inventory.slot(selectedSlot);
         if (ItemIds.tool(held.id())) drawText("USES: " + held.durability() + "/32", left, bottom + size + 25, 1, WHITE);
         drawText(notice, 12, height - 38, 1, WHITE);
-        if (inventoryOpen) drawInventory(width, height);
+        if (inventoryOpen) {
+            if (openContainerPosition!=null) drawContainer(width,height);
+            else drawInventory(width,height);
+        }
         if (!inventoryOpen) {
             int centerX = width / 2;
             int centerY = height / 2;
@@ -709,10 +728,12 @@ public final class Main {
     private void disarmInventoryButtons() {
         inventoryClick.disarm(); sandstoneEdge.disarm(); bricksEdge.disarm();
         recipeUp.disarm(); recipeDown.disarm(); recipeCraft.disarm();
+        for (ButtonEdge edge : containerEdges) edge.disarm();
         for (ButtonEdge edge : slotEdges) edge.disarm();
     }
 
     private void handleInventory() {
+        if (openContainerPosition!=null) { handleContainer(); return; }
         if (inventoryClick.poll(mouse(GLFW_MOUSE_BUTTON_LEFT))) {
             double[] mx = new double[1], my = new double[1];
             glfwGetCursorPos(window, mx, my);
@@ -781,6 +802,84 @@ public final class Main {
                 .append(blockName(input.id())).append("  ");
         drawText(needs.toString(), left + 20, top - 255, 1, WHITE);
         drawText(notice, left + 20, top - 280, 1, WHITE);
+    }
+
+    private BlockContainer openContainer() {
+        return openContainerPosition==null ? null : blocks.containerAt(openContainerPosition[0],openContainerPosition[1],openContainerPosition[2]);
+    }
+
+    private void handleContainer() {
+        BlockContainer box=openContainer();
+        if (box==null) { inventoryOpen=false; openContainerPosition=null; updateCursorMode(); return; }
+        if (inventoryClick.poll(mouse(GLFW_MOUSE_BUTTON_LEFT))) {
+            double[] mx=new double[1],my=new double[1]; glfwGetCursorPos(window,mx,my);
+            int[] ww=new int[1],wh=new int[1]; glfwGetWindowSize(window,ww,wh);
+            int[] fb=framebufferSize();
+            if (ww[0]>0 && wh[0]>0) {
+                double x=mx[0]*fb[0]/ww[0],y=fb[1]-my[0]*fb[1]/wh[0];
+                int left=(fb[0]-760)/2,top=(fb[1]+360)/2;
+                for (int index=0;index<27;index++) {
+                    int sx=left+20+index%9*36,sy=top-94-index/9*40;
+                    if(x>=sx && x<sx+30 && y>=sy && y<sy+30) inventorySelection=index;
+                    if(box.type()==BlockIds.CHEST) {
+                        sx=left+400+index%9*36;
+                        if(x>=sx && x<sx+30 && y>=sy && y<sy+30) containerSelection=index;
+                    }
+                }
+            }
+        }
+        int[] keys={GLFW_KEY_T,GLFW_KEY_B,GLFW_KEY_G,GLFW_KEY_H,GLFW_KEY_J};
+        for(int i=0;i<keys.length;i++) if(containerEdges[i].poll(key(keys[i]))) {
+            boolean moved=false;
+            if(i==0) moved=box.deposit(inventory,inventorySelection,false);
+            if(box.type()==BlockIds.FURNACE) {
+                if(i==1) moved=box.deposit(inventory,inventorySelection,true);
+                if(i>=2) moved=box.withdraw(inventory,i==2 ? 2 : i==3 ? 0 : 1);
+            } else if(i==2) moved=box.withdraw(inventory,containerSelection);
+            notice=moved ? "ITEMS MOVED" : "NO MOVE - CHECK ITEM AND SPACE";
+            if(moved) { blocks.containerChanged(); saveNow("container transfer"); }
+        }
+    }
+
+    private void drawContainer(int width,int height) {
+        BlockContainer box=openContainer(); if(box==null) return;
+        int left=(width-760)/2,top=(height+360)/2;
+        drawQuad(left,top-360,760,360,new float[]{.08f,.10f,.14f});
+        drawText(box.type()==BlockIds.CHEST ? "CHEST" : "FURNACE",left+20,top-24,2,WHITE);
+        drawText("E OR ESC: CLOSE - ALL MENUS PAUSE THE WORLD",left+20,top-42,1,WHITE);
+        drawText("BACKPACK",left+20,top-58,1,SELECT_COLOR);
+        for(int i=0;i<27;i++) drawStorageSlot(inventory.slot(i),left+20+i%9*36,top-94-i/9*40,30,i==inventorySelection);
+        drawText(blockName(inventory.slot(inventorySelection).id()),left+20,top-195,1,WHITE);
+        if(box.type()==BlockIds.CHEST) {
+            drawText("STORAGE",left+400,top-58,1,SELECT_COLOR);
+            for(int i=0;i<27;i++) drawStorageSlot(box.slot(i),left+400+i%9*36,top-94-i/9*40,30,i==containerSelection);
+            Inventory.Stack selected=box.slot(containerSelection);
+            drawText(blockName(selected.id())+(ItemIds.tool(selected.id()) ? " USES: "+selected.durability() : ""),left+400,top-195,1,WHITE);
+            drawText("T: STORE SELECTED BACKPACK STACK",left+20,top-240,1,WHITE);
+            drawText("CLICK STORAGE SLOT THEN G: TAKE WHOLE STACK",left+20,top-258,1,WHITE);
+        } else {
+            String[] names={"INPUT","FUEL","OUTPUT"};
+            for(int i=0;i<3;i++) {
+                drawText(names[i],left+400+i*100,top-70,1,WHITE);
+                drawStorageSlot(box.slot(i),left+400+i*100,top-132,50,false);
+            }
+            drawText("COOK "+box.progress()+"/120   BURN "+box.burn(),left+400,top-160,1,WHITE);
+            drawQuad(left+400,top-180,250,8,PAUSE_COLOR);
+            drawQuad(left+400,top-180,250*box.progress()/120,8,SELECT_COLOR);
+            drawText("T: INPUT ONE   B: FUEL ONE   G: TAKE OUTPUT",left+20,top-240,1,WHITE);
+            drawText("H: RETURN INPUT   J: RETURN FUEL",left+20,top-258,1,WHITE);
+            drawText("CLOSE MENU TO RUN THE FURNACE",left+20,top-282,1,SELECT_COLOR);
+        }
+        drawText(notice,left+20,top-330,1,WHITE);
+    }
+
+    private void drawStorageSlot(Inventory.Stack stack,int x,int y,int size,boolean selected) {
+        if(selected) drawQuad(x-2,y-2,size+4,size+4,SELECT_COLOR);
+        drawQuad(x,y,size,size,new float[]{.18f,.20f,.24f});
+        if(stack.count()>0) {
+            drawQuad(x+4,y+10,size-8,size-14,colorOf(stack.id()));
+            drawText(Integer.toString(stack.count()),x+3,y+2,1,WHITE);
+        }
     }
 
     private void drawText(String text, int x, int y, int scale, float[] color) {
@@ -1213,6 +1312,10 @@ public final class Main {
     }
 
     private static float[] colorOf(int id) {
+        if (id == BlockIds.FURNACE) return new float[]{.30f,.32f,.35f};
+        if (id == BlockIds.CHEST) return new float[]{.70f,.42f,.16f};
+        if (id == BlockIds.GLASS) return new float[]{.62f,.85f,.91f};
+        if (id == ItemIds.CHARCOAL) return new float[]{.18f,.18f,.20f};
         if (id == BlockIds.LOG) return new float[] {0.43f, 0.26f, 0.12f};
         if (id == BlockIds.LEAVES || id == ItemIds.SAPLING) return new float[] {0.21f, 0.51f, 0.15f};
         if (id == BlockIds.PLANKS) return new float[] {0.72f, 0.53f, 0.30f};
@@ -1247,6 +1350,10 @@ public final class Main {
 
     private static String blockName(int id) {
         return switch (id) {
+            case BlockIds.CHEST -> "chest";
+            case BlockIds.FURNACE -> "furnace";
+            case BlockIds.GLASS -> "glass";
+            case ItemIds.CHARCOAL -> "charcoal";
             case BlockIds.LOG -> "log";
             case BlockIds.LEAVES -> "leaves";
             case BlockIds.PLANKS -> "planks";
